@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -37,7 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,8 +88,21 @@ fun GameScreen(state: AppState) {
         PlayerDetailDialog(state, game, game.player(seat), onDismiss = { detailSeat = null })
     }
 
-    (game.outcome as? GameOutcome.Winner)?.let { GameOverDialog(state, game, it.seat) }
-    if (game.outcome is GameOutcome.Draw) GameOverDialog(state, game, winningSeat = null)
+    // Restarting leaves this screen composed, so a dialog opened over the board survives
+    // into the new game unless it is closed here — a player poisoned to death left the
+    // detail dialog sitting in front of the fresh board.
+    val restartAndClose = {
+        detailSeat = null
+        menuOpen = false
+        state.restart()
+    }
+
+    (game.outcome as? GameOutcome.Winner)?.let {
+        GameOverDialog(state, game, it.seat, restartAndClose)
+    }
+    if (game.outcome is GameOutcome.Draw) {
+        GameOverDialog(state, game, winningSeat = null, onRestart = restartAndClose)
+    }
 }
 
 /** Three bars, drawn rather than iconed, so it needs no icon dependency. */
@@ -179,8 +193,25 @@ private fun PlayerPanel(
             // life row shrinks to fit rather than running off the edge of the card.
             val tight = maxWidth < 170.dp
             val lifeSize = if (tight) 34.sp else 48.sp
-            val stepSize = if (tight) 40.dp else 56.dp
             val glyphSize = if (tight) 22.sp else 30.sp
+
+            // Forgiving targets: the whole left third of a panel takes a life off and the
+            // whole right third puts one on, so nobody has to hit a glyph mid-game. The
+            // middle third does nothing, so the card can still be touched safely. This sits
+            // under the content, which only steals the taps it has a button for.
+            if (!player.isOut) {
+                Row(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .clickable { state.adjustLife(player.seat, -1) },
+                    )
+                    Box(Modifier.weight(1f).fillMaxHeight())
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .clickable { state.adjustLife(player.seat, 1) },
+                    )
+                }
+            }
 
             Column(
                 Modifier.fillMaxSize().padding(if (tight) 6.dp else 10.dp),
@@ -209,32 +240,36 @@ private fun PlayerPanel(
                     }
                 }
 
-                if (player.isOut) {
-                    Text(
-                        player.lostTo.describe(game),
-                        color = ink,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                } else {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        StepButton("−", ink, stepSize, glyphSize) {
-                            state.adjustLife(player.seat, -1)
-                        }
+                Box(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (player.isOut) {
                         Text(
-                            player.life.toString(),
+                            player.lostTo.describe(game),
                             color = ink,
-                            fontSize = lifeSize,
                             fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
+                            style = MaterialTheme.typography.titleMedium,
                         )
-                        StepButton("+", ink, stepSize, glyphSize) {
-                            state.adjustLife(player.seat, 1)
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // Equal thirds, so each glyph sits in the middle of the region
+                            // that actually responds to it.
+                            StepGlyph("−", ink, glyphSize, Modifier.weight(1f))
+                            Text(
+                                player.life.toString(),
+                                color = ink,
+                                fontSize = lifeSize,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.weight(1f),
+                            )
+                            StepGlyph("+", ink, glyphSize, Modifier.weight(1f))
                         }
                     }
                 }
@@ -247,7 +282,8 @@ private fun PlayerPanel(
                         Counter("Roll", rolled, null, ink)
                     }
 
-                    if (game.settings.poisonEnabled) {
+                    // Like commander damage: shown once it exists, not as a standing zero.
+                    if (game.settings.poisonEnabled && player.poison > 0) {
                         Counter("Poison", player.poison, game.settings.poisonThreshold, ink)
                     }
 
@@ -274,31 +310,19 @@ private fun PlayerPanel(
     }
 }
 
-/**
- * A plain tappable box rather than a [TextButton]: the button's minimum width and content
- * padding push the glyph past the edge of a narrow panel, which clipped the "+".
- */
+/** Only a label — the tap is handled by the full-height column behind it. */
 @Composable
-private fun StepButton(
-    label: String,
-    ink: Color,
-    size: Dp,
-    glyph: TextUnit,
-    onClick: () -> Unit,
-) {
-    Box(
-        Modifier.size(size).clip(CircleShape).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            color = ink,
-            fontSize = glyph,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
+private fun StepGlyph(label: String, ink: Color, glyph: TextUnit, modifier: Modifier = Modifier) {
+    Text(
+        label,
+        color = ink,
+        fontSize = glyph,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        softWrap = false,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -435,7 +459,12 @@ private fun Adjuster(label: String, onMinus: () -> Unit, onPlus: () -> Unit) {
 }
 
 @Composable
-private fun GameOverDialog(state: AppState, game: GameState, winningSeat: Int?) {
+private fun GameOverDialog(
+    state: AppState,
+    game: GameState,
+    winningSeat: Int?,
+    onRestart: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = {},
         title = { Text(if (winningSeat == null) "A draw" else "${game.player(winningSeat).name} wins") },
@@ -449,7 +478,7 @@ private fun GameOverDialog(state: AppState, game: GameState, winningSeat: Int?) 
                 }
             }
         },
-        confirmButton = { Button(onClick = state::restart) { Text("Play again") } },
+        confirmButton = { Button(onClick = onRestart) { Text("Play again") } },
         dismissButton = { TextButton(onClick = state::leaveGame) { Text("Back to setup") } },
     )
 }

@@ -24,6 +24,9 @@ players and the panels on the far side are rotated to face them.
   hand, and most of the reason this exists
 - The board is all panels and no toolbar: the controls live behind one button where the
   panels meet, within reach of every seat
+- Life is adjusted by tapping anywhere down the left or right third of your own panel
+  rather than a small glyph; the middle third does nothing, so the card is still safe to
+  touch
 - Players drop out automatically on zero life, ten poison, or twenty-one damage from any
   single commander
 - Mill, concede, and "something just killed me" as explicit outs
