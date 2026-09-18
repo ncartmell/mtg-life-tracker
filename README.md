@@ -18,14 +18,18 @@ players and the panels on the far side are rotated to face them.
 
 **During a game**
 
-- Life, poison and per-commander damage
+- Life, poison, and commander damage tracked separately for every commander at the table,
+  so a player with two commanders has two counters against each opponent
 - Commander damage also reduces life — the rule most often got wrong when tracking by
   hand, and most of the reason this exists
+- The board is all panels and no toolbar: the controls live behind one button where the
+  panels meet, within reach of every seat
 - Players drop out automatically on zero life, ten poison, or twenty-one damage from any
   single commander
 - Mill, concede, and "something just killed me" as explicit outs
 - A player removed by mistake can be brought back
-- Roll to decide who goes first; the result is shown, not hidden
+- Roll to decide who goes first; every seat's number lands on its own panel and the
+  winner's panel is outlined, rather than a single name appearing from nowhere
 - Restart with the same players and settings
 
 **Between games**
