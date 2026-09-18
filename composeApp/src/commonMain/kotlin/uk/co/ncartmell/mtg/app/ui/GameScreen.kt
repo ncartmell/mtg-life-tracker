@@ -3,6 +3,7 @@ package uk.co.ncartmell.mtg.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,11 +39,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.Screen
 import uk.co.ncartmell.mtg.engine.CommanderId
@@ -203,12 +210,12 @@ private fun PlayerPanel(
                 Row(Modifier.fillMaxSize()) {
                     Box(
                         Modifier.weight(1f).fillMaxHeight()
-                            .clickable { state.adjustLife(player.seat, -1) },
+                            .repeatingPress { state.adjustLife(player.seat, -1) },
                     )
                     Box(Modifier.weight(1f).fillMaxHeight())
                     Box(
                         Modifier.weight(1f).fillMaxHeight()
-                            .clickable { state.adjustLife(player.seat, 1) },
+                            .repeatingPress { state.adjustLife(player.seat, 1) },
                     )
                 }
             }
@@ -310,7 +317,44 @@ private fun PlayerPanel(
     }
 }
 
-/** Only a label — the tap is handled by the full-height column behind it. */
+private const val HOLD_BEFORE_REPEAT_MS = 400L
+private const val FIRST_REPEAT_MS = 180L
+private const val FASTEST_REPEAT_MS = 45L
+private const val REPEAT_RAMP_MS = 10L
+
+/**
+ * Fires once on press, then repeats while held, getting faster the longer it is held.
+ *
+ * Losing twenty life to one attack is ordinary; tapping twenty times to record it is not.
+ * The callback is read through [rememberUpdatedState] so that the recomposition caused by
+ * each step does not restart the gesture and cut the hold short.
+ */
+@Composable
+private fun Modifier.repeatingPress(onStep: () -> Unit): Modifier {
+    val step by rememberUpdatedState(onStep)
+    return pointerInput(Unit) {
+        detectTapGestures(
+            onPress = {
+                step()
+                coroutineScope {
+                    val repeat = launch {
+                        delay(HOLD_BEFORE_REPEAT_MS)
+                        var interval = FIRST_REPEAT_MS
+                        while (isActive) {
+                            step()
+                            delay(interval)
+                            interval = (interval - REPEAT_RAMP_MS).coerceAtLeast(FASTEST_REPEAT_MS)
+                        }
+                    }
+                    tryAwaitRelease()
+                    repeat.cancel()
+                }
+            },
+        )
+    }
+}
+
+/** Only a label — the press is handled by the full-height column behind it. */
 @Composable
 private fun StepGlyph(label: String, ink: Color, glyph: TextUnit, modifier: Modifier = Modifier) {
     Text(
@@ -452,9 +496,32 @@ private fun PlayerDetailDialog(
 private fun Adjuster(label: String, onMinus: () -> Unit, onPlus: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f))
-        OutlinedButton(onClick = onMinus) { Text("−") }
+        StepperButton("−", onMinus)
         Box(Modifier.size(8.dp))
-        OutlinedButton(onClick = onPlus) { Text("+") }
+        StepperButton("+", onPlus)
+    }
+}
+
+/**
+ * An outlined button in all but name. It is hand-rolled because a [OutlinedButton] owns
+ * its own click handling, which would fire alongside the hold and double every step.
+ */
+@Composable
+private fun StepperButton(label: String, onStep: () -> Unit) {
+    val shape = RoundedCornerShape(20.dp)
+    Box(
+        Modifier.size(width = 64.dp, height = 40.dp)
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+            .repeatingPress(onStep),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = MaterialTheme.colorScheme.primary,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
