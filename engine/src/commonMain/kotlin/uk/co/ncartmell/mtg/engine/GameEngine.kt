@@ -139,10 +139,39 @@ object GameEngine {
         return resolveOutcome(next)
     }
 
-    /** Brings a player back — for correcting a mistake, not for a game effect. */
+    /**
+     * Brings a player back — for correcting a mistake, not for a game effect.
+     *
+     * Whatever was lethal is lifted just clear of its threshold. Clearing [lostTo] alone
+     * does nothing: the counters that removed the player are still over the line, so the
+     * very next check removes them again. A player restored from zero life comes back on
+     * one, which is the smallest claim this can make about what their total should be.
+     */
     fun restore(state: GameState, seat: Int): GameState {
+        val settings = state.settings
         val next = state.copy(
-            players = state.players.map { if (it.seat == seat) it.copy(lostTo = null) else it },
+            players = state.players.map { player ->
+                if (player.seat != seat) {
+                    player
+                } else {
+                    player.copy(
+                        lostTo = null,
+                        life = player.life.coerceAtLeast(1),
+                        poison = if (settings.poisonEnabled) {
+                            player.poison.coerceAtMost(settings.poisonThreshold - 1)
+                        } else {
+                            player.poison
+                        },
+                        commanderDamage = if (settings.commanderDamageEnabled) {
+                            player.commanderDamage.mapValues {
+                                it.value.coerceAtMost(settings.commanderDamageThreshold - 1)
+                            }
+                        } else {
+                            player.commanderDamage
+                        },
+                    )
+                }
+            },
             outcome = null,
         )
         return applyEliminations(next)

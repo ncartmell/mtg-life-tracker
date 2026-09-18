@@ -39,7 +39,8 @@ card's long axis, which is roughly twice the room for a life total.
   applied the moment the flag is cleared, which is what happens when the permanent
   granting it dies
 - Mill, concede, and "something just killed me" as explicit outs
-- A player removed by mistake can be brought back
+- A player removed by mistake can be brought back; whatever was lethal is lifted just
+  clear of its threshold, so someone restored from zero life returns on one
 - Roll to decide who goes first; every seat's number lands on its own panel and the
   winner's panel is outlined, rather than a single name appearing from nowhere
 - Restart with the same players and settings

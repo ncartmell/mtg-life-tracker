@@ -336,11 +336,73 @@ class GameEngineTest {
     }
 
     @Test
-    fun `restoring a player on zero life immediately removes them again`() {
+    fun `restoring a player on zero life brings them back on one`() {
         var state = game(players = 3, life = 20)
         state = GameEngine.adjustLife(state, 1, -20)
+        assertTrue(state.player(1).isOut)
+
         state = GameEngine.restore(state, 1)
-        assertTrue(state.player(1).isOut, "still on zero life, so still out")
+
+        assertFalse(state.player(1).isOut, "restoring has to survive the next check")
+        assertEquals(1, state.player(1).life)
+    }
+
+    @Test
+    fun `restoring a player past zero life still brings them back on one`() {
+        var state = game(players = 3, life = 20)
+        state = GameEngine.adjustLife(state, 1, -35)
+        state = GameEngine.restore(state, 1)
+
+        assertFalse(state.player(1).isOut)
+        assertEquals(1, state.player(1).life)
+    }
+
+    @Test
+    fun `restoring a poisoned player drops them below the threshold`() {
+        var state = game(players = 3)
+        state = GameEngine.adjustPoison(state, 1, 10)
+        assertTrue(state.player(1).isOut)
+
+        state = GameEngine.restore(state, 1)
+
+        assertFalse(state.player(1).isOut)
+        assertEquals(9, state.player(1).poison)
+    }
+
+    @Test
+    fun `restoring after commander damage drops that commander below the threshold`() {
+        val from = CommanderId(2, 0)
+        var state = game(players = 3, life = 40)
+        state = GameEngine.adjustCommanderDamage(state, 1, from, 21)
+        assertTrue(state.player(1).isOut)
+
+        state = GameEngine.restore(state, 1)
+
+        assertFalse(state.player(1).isOut)
+        assertEquals(20, state.player(1).damageFrom(from))
+    }
+
+    @Test
+    fun `restoring leaves everything that was not lethal alone`() {
+        var state = game(players = 3, life = 20)
+        state = GameEngine.adjustPoison(state, 1, 4)
+        state = GameEngine.adjustLife(state, 1, -20)
+        state = GameEngine.restore(state, 1)
+
+        assertEquals(4, state.player(1).poison, "poison was never over the line")
+        assertEquals(1, state.player(1).life)
+    }
+
+    @Test
+    fun `restoring a player reopens a game that had been won`() {
+        var state = game(players = 2, life = 20)
+        state = GameEngine.adjustLife(state, 1, -20)
+        assertEquals(GameOutcome.Winner(0), state.outcome)
+
+        state = GameEngine.restore(state, 1)
+
+        assertNull(state.outcome)
+        assertFalse(state.player(1).isOut)
     }
 
     // --- outcome ---------------------------------------------------------------------
