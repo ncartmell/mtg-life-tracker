@@ -199,8 +199,15 @@ private fun PlayerPanel(
             // Six players on a phone leaves each panel about a third of the screen, so the
             // life row shrinks to fit rather than running off the edge of the card.
             val tight = maxWidth < 170.dp
-            val lifeSize = if (tight) 34.sp else 48.sp
             val glyphSize = if (tight) 22.sp else 30.sp
+            // A panel does not grow to suit a three-figure total, so the total shrinks to
+            // suit the panel. Sizes are stepped rather than continuous so that a life
+            // total does not visibly resize on every single point of damage.
+            val lifeSize = when (player.life.toString().length) {
+                in 0..2 -> if (tight) 34.sp else 48.sp
+                3 -> if (tight) 26.sp else 40.sp
+                else -> if (tight) 20.sp else 30.sp
+            }
 
             // Forgiving targets: the whole left third of a panel takes a life off and the
             // whole right third puts one on, so nobody has to hit a glyph mid-game. The
@@ -263,8 +270,10 @@ private fun PlayerPanel(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // Equal thirds, so each glyph sits in the middle of the region
-                            // that actually responds to it.
+                            // The total takes the width it needs and the glyphs split
+                            // what is left. Giving the total a fixed third instead cut the
+                            // digits off at the edges. Splitting the remainder still leaves
+                            // each glyph inside the third that responds to it.
                             StepGlyph("−", ink, glyphSize, Modifier.weight(1f))
                             Text(
                                 player.life.toString(),
@@ -274,7 +283,7 @@ private fun PlayerPanel(
                                 textAlign = TextAlign.Center,
                                 maxLines = 1,
                                 softWrap = false,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.padding(horizontal = 2.dp),
                             )
                             StepGlyph("+", ink, glyphSize, Modifier.weight(1f))
                         }
