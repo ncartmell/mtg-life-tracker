@@ -90,6 +90,9 @@ class AppState(
     fun setCommanderCount(seat: Int, count: Int) =
         updateGame { GameEngine.setCommanderCount(it, seat, count) }
 
+    fun setCannotLose(seat: Int, value: Boolean) =
+        updateGame { GameEngine.setCannotLose(it, seat, value) }
+
     fun eliminate(seat: Int, reason: LossReason) =
         updateGame { GameEngine.eliminate(it, seat, reason) }
 

@@ -23,6 +23,96 @@ class GameEngineTest {
         seats(players),
     )
 
+    // --- cannot lose -----------------------------------------------------------------
+
+    @Test
+    fun `a player who cannot lose survives zero life`() {
+        var state = GameEngine.setCannotLose(game(), seat = 0, value = true)
+        state = GameEngine.adjustLife(state, seat = 0, delta = -40)
+
+        assertEquals(0, state.player(0).life)
+        assertFalse(state.player(0).isOut)
+        assertNull(state.outcome)
+    }
+
+    @Test
+    fun `a player who cannot lose survives lethal poison and commander damage`() {
+        var state = GameEngine.setCannotLose(game(), seat = 0, value = true)
+        state = GameEngine.adjustPoison(state, seat = 0, delta = 10)
+        state = GameEngine.adjustCommanderDamage(state, seat = 0, from = CommanderId(1, 0), delta = 21)
+
+        assertEquals(10, state.player(0).poison)
+        assertEquals(21, state.player(0).damageFrom(CommanderId(1, 0)))
+        assertFalse(state.player(0).isOut)
+    }
+
+    @Test
+    fun `counters keep climbing underneath the flag`() {
+        var state = GameEngine.setCannotLose(game(), seat = 0, value = true)
+        state = GameEngine.adjustLife(state, seat = 0, delta = -55)
+
+        // Not clamped at zero: the life total is still the truth of what has happened.
+        assertEquals(-15, state.player(0).life)
+        assertFalse(state.player(0).isOut)
+    }
+
+    @Test
+    fun `clearing the flag applies every threshold that built up while it was set`() {
+        var state = GameEngine.setCannotLose(game(), seat = 0, value = true)
+        state = GameEngine.adjustLife(state, seat = 0, delta = -40)
+        assertFalse(state.player(0).isOut)
+
+        state = GameEngine.setCannotLose(state, seat = 0, value = false)
+
+        assertTrue(state.player(0).isOut)
+        assertEquals(LossReason.LifeDepleted, state.player(0).lostTo)
+    }
+
+    @Test
+    fun `clearing the flag reports poison when poison is what was lethal`() {
+        var state = GameEngine.setCannotLose(game(), seat = 0, value = true)
+        state = GameEngine.adjustPoison(state, seat = 0, delta = 10)
+        state = GameEngine.setCannotLose(state, seat = 0, value = false)
+
+        assertEquals(LossReason.Poison, state.player(0).lostTo)
+    }
+
+    @Test
+    fun `a player who cannot lose can still be removed by hand`() {
+        var state = GameEngine.setCannotLose(game(), seat = 0, value = true)
+        state = GameEngine.eliminate(state, seat = 0, reason = LossReason.Conceded)
+
+        assertTrue(state.player(0).isOut)
+        assertEquals(LossReason.Conceded, state.player(0).lostTo)
+    }
+
+    @Test
+    fun `the flag protects only the seat it was set on`() {
+        var state = GameEngine.setCannotLose(game(), seat = 0, value = true)
+        state = GameEngine.adjustLife(state, seat = 0, delta = -40)
+        state = GameEngine.adjustLife(state, seat = 1, delta = -40)
+
+        assertFalse(state.player(0).isOut)
+        assertTrue(state.player(1).isOut)
+    }
+
+    @Test
+    fun `the last survivor still wins when everyone else is gone`() {
+        var state = GameEngine.setCannotLose(game(players = 2), seat = 0, value = true)
+        state = GameEngine.adjustLife(state, seat = 0, delta = -40)
+        state = GameEngine.adjustLife(state, seat = 1, delta = -40)
+
+        assertEquals(GameOutcome.Winner(0), state.outcome)
+    }
+
+    @Test
+    fun `restarting clears the flag`() {
+        var state = GameEngine.setCannotLose(game(), seat = 0, value = true)
+        state = GameEngine.restart(state)
+
+        assertFalse(state.player(0).cannotLose)
+    }
+
     // --- setup -----------------------------------------------------------------------
 
     @Test

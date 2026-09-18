@@ -4,7 +4,9 @@ A life tracker for Magic: The Gathering, built with Kotlin Multiplatform and Com
 Multiplatform. One shared codebase for Android, iOS and desktop.
 
 Everybody sits around one device, so the board rearranges itself for the number of
-players and the panels on the far side are rotated to face them.
+players and every panel turns to face the person it belongs to. On the four-player board
+that is a quarter turn — two players sit down each side, and their panels read along the
+card's long axis, which is roughly twice the room for a life total.
 
 ## What it does
 
@@ -32,6 +34,10 @@ players and the panels on the far side are rotated to face them.
   commander damage in a player's detail view
 - Players drop out automatically on zero life, ten poison, or twenty-one damage from any
   single commander
+- A player can be marked as unable to lose, for Platinum Angel and the like. Counters are
+  not frozen underneath it — life still falls past zero — and everything that built up is
+  applied the moment the flag is cleared, which is what happens when the permanent
+  granting it dies
 - Mill, concede, and "something just killed me" as explicit outs
 - A player removed by mistake can be brought back
 - Roll to decide who goes first; every seat's number lands on its own panel and the

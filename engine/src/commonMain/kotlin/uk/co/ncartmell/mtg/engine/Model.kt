@@ -139,6 +139,11 @@ data class PlayerState(
     val commanderCount: Int = 1,
     /** Damage received, keyed by the commander that dealt it. */
     val commanderDamage: Map<CommanderId, Int> = emptyMap(),
+    /**
+     * Set while an effect says this player cannot lose the game — Platinum Angel and the
+     * like. Counters keep climbing underneath it; they are simply not acted on.
+     */
+    val cannotLose: Boolean = false,
     val lostTo: LossReason? = null,
 ) {
     init {

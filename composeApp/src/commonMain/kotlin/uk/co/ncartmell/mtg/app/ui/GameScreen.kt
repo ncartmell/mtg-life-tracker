@@ -25,6 +25,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,8 +41,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,13 +73,13 @@ fun GameScreen(state: AppState) {
                     Modifier.weight(1f).fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    row.seats.forEach { seat ->
+                    row.seats.forEach { boardSeat ->
                         PlayerPanel(
                             state = state,
                             game = game,
-                            player = game.player(seat),
-                            rotated = row.rotated,
-                            onOpenDetail = { detailSeat = seat },
+                            player = game.player(boardSeat.seat),
+                            facing = boardSeat.facing,
+                            onOpenDetail = { detailSeat = boardSeat.seat },
                             modifier = Modifier.weight(1f).fillMaxSize(),
                         )
                     }
@@ -175,7 +178,7 @@ private fun PlayerPanel(
     state: AppState,
     game: GameState,
     player: PlayerState,
-    rotated: Boolean,
+    facing: Facing,
     onOpenDetail: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -193,7 +196,7 @@ private fun PlayerPanel(
     ) {
         BoxWithConstraints(
             Modifier.fillMaxSize()
-                .rotate(if (rotated) 180f else 0f)
+                .facing(facing)
                 .alpha(if (player.isOut) 0.45f else 1f),
         ) {
             // Six players on a phone leaves each panel about a third of the screen, so the
@@ -227,37 +230,12 @@ private fun PlayerPanel(
                 }
             }
 
-            Column(
-                Modifier.fillMaxSize().padding(if (tight) 6.dp else 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        player.name + if (goesFirst && !tight) " · first" else "",
-                        color = ink,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        style = if (tight) MaterialTheme.typography.labelMedium
-                        else MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    TextButton(
-                        onClick = onOpenDetail,
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) {
-                        Text("More", color = ink, style = MaterialTheme.typography.labelMedium)
-                    }
-                }
+            // Overlaid rather than stacked. Stacking centred the total in whatever was
+            // left between the name and the counters, and those two bands are different
+            // heights, so the total sat off centre by the difference.
+            Box(Modifier.fillMaxSize().padding(if (tight) 6.dp else 10.dp)) {
 
-                Box(
-                    Modifier.weight(1f).fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
-                ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (player.isOut) {
                         Text(
                             player.lostTo.describe(game),
@@ -274,7 +252,7 @@ private fun PlayerPanel(
                             // what is left. Giving the total a fixed third instead cut the
                             // digits off at the edges. Splitting the remainder still leaves
                             // each glyph inside the third that responds to it.
-                            StepGlyph("−", ink, glyphSize, Modifier.weight(1f))
+                            StepGlyph("\u2212", ink, glyphSize, Modifier.weight(1f))
                             Text(
                                 player.life.toString(),
                                 color = ink,
@@ -290,10 +268,44 @@ private fun PlayerPanel(
                     }
                 }
 
+                Row(
+                    Modifier.fillMaxWidth().align(Alignment.TopCenter),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        player.name + if (goesFirst && !tight) " \u00b7 first" else "",
+                        color = ink,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        style = if (tight) MaterialTheme.typography.labelMedium
+                        else MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    TextButton(
+                        onClick = onOpenDetail,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) {
+                        Text("More", color = ink, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
                 FlowRow(
+                    Modifier.fillMaxWidth().align(Alignment.BottomCenter),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    if (player.cannotLose) {
+                        Text(
+                            "Can't lose",
+                            color = ink,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+
                     game.lastRoll?.results?.get(player.seat)?.let { rolled ->
                         Counter("Roll", rolled, null, ink)
                     }
@@ -324,6 +336,40 @@ private fun PlayerPanel(
             }
         }
     }
+}
+
+/**
+ * Turns a panel's contents to face a given edge of the device.
+ *
+ * A quarter turn swaps the constraints before rotating. [Modifier.rotate] on its own only
+ * turns what is drawn, so the content would still be measured against the panel's short
+ * side and then drawn along its long one — the life total would be laid out in 190dp and
+ * merely displayed sideways. Swapping first is what actually buys the space, and it means
+ * BoxWithConstraints above reports the reading width rather than the screen width.
+ */
+private fun Modifier.facing(facing: Facing): Modifier = when (facing) {
+    Facing.BOTTOM -> this
+    Facing.TOP -> this.rotate(facing.degrees)
+    Facing.LEFT, Facing.RIGHT -> this
+        .layout { measurable, constraints ->
+            val placeable = measurable.measure(
+                Constraints(
+                    minWidth = constraints.minHeight,
+                    maxWidth = constraints.maxHeight,
+                    minHeight = constraints.minWidth,
+                    maxHeight = constraints.maxWidth,
+                ),
+            )
+            // Report the slot's own orientation back to the parent, and offset the child
+            // so that its centre still lands on the slot's centre once rotated.
+            layout(placeable.height, placeable.width) {
+                placeable.place(
+                    x = (placeable.height - placeable.width) / 2,
+                    y = (placeable.width - placeable.height) / 2,
+                )
+            }
+        }
+        .rotate(facing.degrees)
 }
 
 private const val HOLD_BEFORE_REPEAT_MS = 400L
@@ -470,6 +516,21 @@ private fun PlayerDetailDialog(
                             }
                         }
                     }
+                }
+
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Cannot lose the game", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Counters keep counting. Everything that built up applies the " +
+                                "moment this is turned off.",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    Switch(
+                        checked = player.cannotLose,
+                        onCheckedChange = { state.setCannotLose(player.seat, it) },
+                    )
                 }
 
                 if (player.isOut) {

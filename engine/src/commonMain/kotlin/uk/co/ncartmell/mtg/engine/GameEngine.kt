@@ -47,6 +47,7 @@ object GameEngine {
                 life = state.settings.startingLife,
                 poison = 0,
                 commanderDamage = emptyMap(),
+                cannotLose = false,
                 lostTo = null,
             )
         },
@@ -107,6 +108,22 @@ object GameEngine {
                 } else {
                     player.copy(commanderCount = count)
                 }
+            },
+        )
+        return applyEliminations(next)
+    }
+
+    /**
+     * Marks a player as unable to lose the game, for effects such as Platinum Angel.
+     *
+     * Counters are not frozen: life still falls, poison still accumulates, and the moment
+     * the flag is cleared every threshold is applied at once. That is what happens at a
+     * table when the permanent granting it is destroyed, so it is what the engine does.
+     */
+    fun setCannotLose(state: GameState, seat: Int, value: Boolean): GameState {
+        val next = state.copy(
+            players = state.players.map {
+                if (it.seat == seat) it.copy(cannotLose = value) else it
             },
         )
         return applyEliminations(next)
@@ -183,6 +200,9 @@ object GameEngine {
     }
 
     private fun detectLoss(player: PlayerState, settings: GameSettings): LossReason? {
+        // Nothing the engine can detect applies while this is set. Being removed by hand
+        // still does, so conceding and "something just killed me" remain available.
+        if (player.cannotLose) return null
         if (player.life <= 0) return LossReason.LifeDepleted
         if (settings.poisonEnabled && player.poison >= settings.poisonThreshold) {
             return LossReason.Poison
