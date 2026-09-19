@@ -50,10 +50,11 @@ data class ProfileBook(val profiles: List<PlayerProfile> = emptyList()) {
     fun recordResult(game: GameState): ProfileBook {
         val outcome = game.outcome ?: return this
         if (outcome is GameOutcome.Draw) return this
-        val winningSeat = (outcome as GameOutcome.Winner).seat
+        // A team win is a win for everybody on the team, not just whoever was left.
+        val winningSeats = outcome.winningSeats.toSet()
 
         val updates = game.players.mapNotNull { player ->
-            player.profileId?.let { it to (player.seat == winningSeat) }
+            player.profileId?.let { it to (player.seat in winningSeats) }
         }.toMap()
 
         return copy(

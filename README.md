@@ -57,9 +57,24 @@ membership and TestFlight, so building it from Xcode is the only route.
   commander damage in a player's detail view
 - Players drop out automatically on zero life, ten poison, or twenty-one damage from any
   single commander
-- Star, for five players: everyone sits in seat order and your opponents are the two you
-  are not sitting next to. You win the moment both are out, with three players still in
-  — each panel shows which two seats it is waiting on, and how many are down
+- Five formats, all of them arrangements of teams so the engine has one win rule rather
+  than five:
+  - **Free-for-all** — last player standing
+  - **Star** (5) — your opponents are the two you are not sitting next to; win when both
+    are out, with three players still in. The board is laid out as a star so who is next
+    to whom is visible
+  - **Two-Headed Giant** (4) — two pairs, each sharing one life total and one set of
+    poison counters, at 30 life and a poison threshold of 15
+  - **Archenemy** (3–6) — seat one against everybody else
+  - **Emperor** (6) — two teams of three; a team falls the moment its emperor does,
+    however healthy its generals are
+- Whose turn it is and how many turns have been taken, passed round in seat order and
+  skipping anyone who is out
+- A roll screen: the whole table's roll for first player laid out in order, tie-breaks
+  shown as the separate rounds they were, and ordinary dice from d4 to d20 plus a coin
+- Every finished game kept — seats, who won, how long — under the leaderboard, so the
+  running totals can be traced back to the games behind them
+- The screen is held awake while a game is on
 - A player who is out has their colour drained away and is marked plainly, so the board
   reads at a glance; the winner is ringed and labelled on the board, not only in a dialog
 - A player can be marked as unable to lose, for Platinum Angel and the like. Counters are

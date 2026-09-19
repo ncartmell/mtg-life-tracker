@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.Screen
+import uk.co.ncartmell.mtg.engine.Format
 import uk.co.ncartmell.mtg.engine.GameSettings
 import uk.co.ncartmell.mtg.engine.PlayerColour
 import uk.co.ncartmell.mtg.engine.SeatSetup
@@ -45,10 +48,7 @@ fun SetupScreen(state: AppState) {
     var startingLife by remember { mutableStateOf(40) }
     var commanderDamage by remember { mutableStateOf(true) }
     var poison by remember { mutableStateOf(true) }
-    var star by remember { mutableStateOf(false) }
-    // Star is a five-player format, so the toggle cannot outlive a change of player count.
-    val starAvailable = playerCount == GameSettings.STAR_PLAYERS
-    if (!starAvailable && star) star = false
+    var format by remember { mutableStateOf(Format.FREE_FOR_ALL) }
 
     // Seat assignments, indexed by seat. Null profile means a guest.
     val seatProfiles = remember { mutableStateListOfNulls(GameSettings.MAX_PLAYERS) }
@@ -70,9 +70,35 @@ fun SetupScreen(state: AppState) {
         }
 
         item {
+            Section("Format") {
+                ChoiceRow(
+                    options = Format.entries,
+                    selected = format,
+                    label = { it.label },
+                    onSelect = { picked ->
+                        format = picked
+                        // Every format but free-for-all fixes or narrows the table, so
+                        // choosing one sets a count that is actually legal for it.
+                        val defaults = GameSettings.defaultsFor(picked)
+                        playerCount = playerCount.coerceIn(picked.players)
+                        if (picked != Format.FREE_FOR_ALL) {
+                            playerCount = defaults.playerCount
+                            startingLife = defaults.startingLife
+                        }
+                    },
+                )
+                Text(
+                    format.describe(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        item {
             Section("Players") {
                 ChoiceRow(
-                    options = (GameSettings.MIN_PLAYERS..GameSettings.MAX_PLAYERS).toList(),
+                    options = format.players.toList(),
                     selected = playerCount,
                     label = { it.toString() },
                     onSelect = { playerCount = it },
@@ -95,16 +121,7 @@ fun SetupScreen(state: AppState) {
             Section("Rules") {
                 ToggleRow("Commander damage", commanderDamage) { commanderDamage = it }
                 ToggleRow("Poison counters", poison) { poison = it }
-                if (starAvailable) {
-                    ToggleRow("Star format", star) { star = it }
-                    Text(
-                        "Everyone sits in seat order. Your opponents are the two players " +
-                            "you are not sitting next to, and you win when both are out — " +
-                            "even with three players still in.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+
             }
         }
 
@@ -114,6 +131,7 @@ fun SetupScreen(state: AppState) {
             SeatCard(
                 state = state,
                 seat = seat,
+                seatLabel = format.seatLabel(seat),
                 selectedProfileId = seatProfiles[seat],
                 takenProfileIds = seatProfiles.take(playerCount).filterNotNull().toSet(),
                 commanderCount = seatCommanders[seat],
@@ -133,7 +151,8 @@ fun SetupScreen(state: AppState) {
                         startingLife = startingLife,
                         commanderDamageEnabled = commanderDamage,
                         poisonEnabled = poison,
-                        starFormat = star && starAvailable,
+                        format = format,
+                        poisonThreshold = GameSettings.defaultsFor(format).poisonThreshold,
                     )
                     val seats = (0 until playerCount).map { seat ->
                         val profile = seatProfiles[seat]?.let { state.book[it] }
@@ -156,6 +175,7 @@ fun SetupScreen(state: AppState) {
 private fun SeatCard(
     state: AppState,
     seat: Int,
+    seatLabel: String,
     selectedProfileId: String?,
     takenProfileIds: Set<String>,
     commanderCount: Int,
@@ -165,7 +185,7 @@ private fun SeatCard(
 ) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Seat ${seat + 1}", fontWeight = FontWeight.SemiBold)
+            Text(seatLabel, fontWeight = FontWeight.SemiBold)
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Guest", selected = selectedProfileId == null) { onProfile(null) }
@@ -241,6 +261,11 @@ private fun Section(title: String, content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * Wraps rather than running off the edge. Five formats with names like "Two-Headed Giant"
+ * do not fit across a phone, and a Row would simply have put the last two off-screen.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun <T> ChoiceRow(
     options: List<T>,
@@ -248,7 +273,10 @@ private fun <T> ChoiceRow(
     label: (T) -> String,
     onSelect: (T) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         options.forEach { option ->
             Chip(label(option), selected = option == selected) { onSelect(option) }
         }
@@ -264,14 +292,14 @@ private fun Chip(
     onClick: () -> Unit,
 ) {
     if (selected) {
-        Button(onClick = onClick, enabled = enabled) { Text(label) }
+        Button(onClick = onClick, enabled = enabled) { Text(label, maxLines = 1) }
     } else {
         OutlinedButton(onClick = onClick, enabled = enabled) {
             tint?.let {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(it))
                 Box(Modifier.size(6.dp))
             }
-            Text(label)
+            Text(label, maxLines = 1)
         }
     }
 }
@@ -292,3 +320,27 @@ private fun mutableStateListOfNulls(size: Int) =
 
 private fun mutableStateListOfOnes(size: Int) =
     androidx.compose.runtime.mutableStateListOf<Int>().apply { repeat(size) { add(1) } }
+
+/** A sentence on what a format actually is, for the setup screen. */
+private fun Format.describe(): String = when (this) {
+    Format.FREE_FOR_ALL -> "Last player standing wins."
+    Format.STAR ->
+        "Five in a ring. Your opponents are the two players you are not sitting next to, " +
+            "and you win when both are out — even with three players still in."
+    Format.TWO_HEADED_GIANT ->
+        "Two teams of two, sitting in pairs. Each team shares one life total and one " +
+            "set of poison counters."
+    Format.ARCHENEMY -> "Seat one against everybody else. The archenemy wins alone."
+    Format.EMPEROR ->
+        "Two teams of three, each with its emperor in the middle seat. A team loses the " +
+            "moment its emperor does, however healthy its generals are."
+}
+
+/** What a seat is, where the format gives it a job. */
+private fun Format.seatLabel(seat: Int): String = when (this) {
+    Format.TWO_HEADED_GIANT -> "Seat ${seat + 1} — team ${seat / 2 + 1}"
+    Format.ARCHENEMY -> if (seat == 0) "Seat 1 — archenemy" else "Seat ${seat + 1}"
+    Format.EMPEROR ->
+        "Seat ${seat + 1} — team ${seat / 3 + 1}" + if (seat % 3 == 1) ", emperor" else ""
+    else -> "Seat ${seat + 1}"
+}

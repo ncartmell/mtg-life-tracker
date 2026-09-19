@@ -21,16 +21,17 @@ data class GameRecord(
     val playedAt: Long,
     val settings: GameSettings,
     val seats: List<RecordedSeat>,
-    /** Null for a draw. */
-    val winningSeat: Int? = null,
+    /** Empty for a draw; more than one when a team won. */
+    val winningSeats: List<Int> = emptyList(),
     val turns: Int = 0,
 ) {
-    val wasDraw: Boolean get() = winningSeat == null
-    val winner: RecordedSeat? get() = seats.firstOrNull { it.seat == winningSeat }
+    val wasDraw: Boolean get() = winningSeats.isEmpty()
+    val winners: List<RecordedSeat> get() = seats.filter { it.seat in winningSeats }
+    val winner: RecordedSeat? get() = winners.firstOrNull()
 
     fun seatFor(profileId: String): RecordedSeat? = seats.firstOrNull { it.profileId == profileId }
     fun involved(profileId: String): Boolean = seatFor(profileId) != null
-    fun wasWonBy(profileId: String): Boolean = winner?.profileId == profileId
+    fun wasWonBy(profileId: String): Boolean = winners.any { it.profileId == profileId }
 }
 
 /**
@@ -58,7 +59,7 @@ data class GameHistory(val games: List<GameRecord> = emptyList()) {
                     life = player.life,
                 )
             },
-            winningSeat = (outcome as? GameOutcome.Winner)?.seat,
+            winningSeats = outcome.winningSeats,
             turns = game.turnCount,
         )
         return copy(games = (listOf(record) + games).take(MAX_GAMES))

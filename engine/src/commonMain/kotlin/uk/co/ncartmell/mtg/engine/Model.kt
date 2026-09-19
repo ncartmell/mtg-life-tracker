@@ -70,15 +70,59 @@ sealed interface LossReason {
     data object Conceded : LossReason
 }
 
+/**
+ * How a table is divided up, and therefore what winning means.
+ *
+ * Every format here is some arrangement of teams: free-for-all is the degenerate case
+ * where each player is a team of one, and the rest differ in how the teams are drawn and
+ * in what it takes to knock one out. Keeping it to that one idea means the engine has a
+ * single win rule rather than five.
+ */
+@Serializable
+enum class Format(val label: String, val players: IntRange) {
+    FREE_FOR_ALL("Free-for-all", 2..6),
+
+    /** Five in a ring; your team of one beats the two seats you are not sitting next to. */
+    STAR("Star", 5..5),
+
+    /** Four in two pairs, each pair sharing one life total. */
+    TWO_HEADED_GIANT("Two-Headed Giant", 4..4),
+
+    /** Seat one against everybody else. */
+    ARCHENEMY("Archenemy", 3..6),
+
+    /** Six in two teams of three; a team falls when its emperor does. */
+    EMPEROR("Emperor", 6..6),
+    ;
+
+    val isTeamGame: Boolean get() = this == TWO_HEADED_GIANT || this == ARCHENEMY || this == EMPEROR
+    val sharesLife: Boolean get() = this == TWO_HEADED_GIANT
+
+    fun allows(playerCount: Int): Boolean = playerCount in players
+}
+
 /** How a game ended. */
 @Serializable
 sealed interface GameOutcome {
     @Serializable
     data class Winner(val seat: Int) : GameOutcome
 
+    /** A team won. Every seat listed shares the win. */
+    @Serializable
+    data class TeamWin(val seats: List<Int>) : GameOutcome
+
     /** Everybody left at the same time — rare, but legal. */
     @Serializable
     data object Draw : GameOutcome
+    ;
+
+    /** Every seat that won, however the win was shaped. */
+    val winningSeats: List<Int>
+        get() = when (this) {
+            is Winner -> listOf(seat)
+            is TeamWin -> seats
+            Draw -> emptyList()
+        }
 }
 
 /**
@@ -93,11 +137,7 @@ data class GameSettings(
     val startingLife: Int,
     val commanderDamageEnabled: Boolean = true,
     val poisonEnabled: Boolean = true,
-    /**
-     * Star: five players sit in a ring and each has two opponents — the two they are not
-     * sitting next to. You win when both of yours are out, however many players are left.
-     */
-    val starFormat: Boolean = false,
+    val format: Format = Format.FREE_FOR_ALL,
     val poisonThreshold: Int = 10,
     val commanderDamageThreshold: Int = 21,
 ) {
@@ -108,8 +148,8 @@ data class GameSettings(
         require(startingLife > 0) { "Starting life must be positive, got $startingLife" }
         require(poisonThreshold > 0) { "Poison threshold must be positive" }
         require(commanderDamageThreshold > 0) { "Commander damage threshold must be positive" }
-        require(!starFormat || playerCount == STAR_PLAYERS) {
-            "Star is a $STAR_PLAYERS-player format, got $playerCount"
+        require(format.allows(playerCount)) {
+            "${format.label} takes ${format.players} players, got $playerCount"
         }
     }
 
@@ -122,6 +162,21 @@ data class GameSettings(
 
         /** Starting life totals offered in setup; any value is accepted. */
         val COMMON_LIFE_TOTALS = listOf(20, 25, 30, 40)
+
+        /** What a format expects before anybody changes it. */
+        fun defaultsFor(format: Format): GameSettings = when (format) {
+            Format.TWO_HEADED_GIANT -> GameSettings(
+                playerCount = 4,
+                startingLife = 30,
+                format = format,
+                // A shared life total takes twice the poison to kill.
+                poisonThreshold = 15,
+            )
+            Format.STAR -> GameSettings(playerCount = 5, startingLife = 40, format = format)
+            Format.EMPEROR -> GameSettings(playerCount = 6, startingLife = 20, format = format)
+            Format.ARCHENEMY -> GameSettings(playerCount = 4, startingLife = 20, format = format)
+            Format.FREE_FOR_ALL -> GameSettings(playerCount = 4, startingLife = 40)
+        }
 
         fun commander(playerCount: Int) = GameSettings(
             playerCount = playerCount,
@@ -192,13 +247,51 @@ data class GameState(
             ?: error("No player in seat $seat")
 
     /**
+     * Which team a seat belongs to. In a free-for-all that is just the seat itself.
+     *
+     * Teams are drawn from seating, so who sits where is the whole setup: pairs sit
+     * together in Two-Headed Giant, the archenemy takes seat one, and an emperor sits
+     * between their two generals.
+     */
+    fun teamOf(seat: Int): Int = when (settings.format) {
+        Format.TWO_HEADED_GIANT -> seat / 2
+        Format.ARCHENEMY -> if (seat == 0) 0 else 1
+        Format.EMPEROR -> seat / 3
+        else -> seat
+    }
+
+    fun seatsInTeam(team: Int): List<Int> = players.map { it.seat }.filter { teamOf(it) == team }
+
+    val teams: List<Int> get() = players.map { teamOf(it.seat) }.distinct().sorted()
+
+    /** The seat whose loss takes a whole team with it, where a format has one. */
+    fun emperorSeat(team: Int): Int? =
+        if (settings.format != Format.EMPEROR) null else seatsInTeam(team).getOrNull(1)
+
+    /**
+     * A team is out when it can no longer win.
+     *
+     * Emperor is the exception worth naming: a team falls the moment its emperor does,
+     * however healthy its generals still are.
+     */
+    fun teamIsOut(team: Int): Boolean {
+        val seats = seatsInTeam(team)
+        if (seats.isEmpty()) return true
+        emperorSeat(team)?.let { return player(it).isOut }
+        return seats.all { player(it).isOut }
+    }
+
+    /** Teammates of a seat, not counting the seat itself. */
+    fun alliesOf(seat: Int): List<Int> = seatsInTeam(teamOf(seat)).filter { it != seat }
+
+    /**
      * The two seats opposite this one, in Star. Empty in every other format.
      *
      * Seats run round the table in order, so a seat is adjacent to the seats either side
      * of it and opposed to the other two.
      */
     fun starOpponents(seat: Int): List<Int> =
-        if (!settings.starFormat) emptyList()
+        if (settings.format != Format.STAR) emptyList()
         else listOf((seat + 2) % players.size, (seat + 3) % players.size)
 
     /** Every commander at the table other than this seat's own. */

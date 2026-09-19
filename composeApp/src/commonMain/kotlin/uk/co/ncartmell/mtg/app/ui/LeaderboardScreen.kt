@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.Screen
+import uk.co.ncartmell.mtg.engine.Format
 import uk.co.ncartmell.mtg.engine.GameRecord
 import kotlin.math.roundToInt
 
@@ -119,7 +120,7 @@ private fun GameRow(record: GameRecord) {
                             .background(winner.colour.composeColor()),
                     )
                     Text(
-                        "${winner.name} won",
+                        record.winners.joinToString(" & ") { it.name } + " won",
                         Modifier.padding(start = 10.dp).weight(1f),
                         fontWeight = FontWeight.Medium,
                     )
@@ -130,7 +131,9 @@ private fun GameRow(record: GameRecord) {
                     buildString {
                         append("${record.seats.size}p")
                         append("  ·  ${record.settings.startingLife}")
-                        if (record.settings.starFormat) append("  ·  Star")
+                        if (record.settings.format != Format.FREE_FOR_ALL) {
+                            append("  ·  ${record.settings.format.label}")
+                        }
                         if (record.turns > 0) append("  ·  ${record.turns} turns")
                     },
                     style = MaterialTheme.typography.labelMedium,
@@ -139,7 +142,7 @@ private fun GameRow(record: GameRecord) {
             }
             Text(
                 record.seats
-                    .filter { it.seat != record.winningSeat }
+                    .filterNot { it.seat in record.winningSeats }
                     .joinToString(", ") { it.name },
                 Modifier.padding(top = 4.dp),
                 style = MaterialTheme.typography.labelMedium,

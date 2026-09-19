@@ -81,7 +81,7 @@ fun GameScreen(state: AppState) {
 
     Box(Modifier.fillMaxSize().padding(8.dp)) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            boardLayout(game.settings.playerCount, game.settings.starFormat).forEach { row ->
+            boardLayout(game.settings.playerCount, game.settings.format).forEach { row ->
                 Row(
                     Modifier.weight(1f).fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -130,11 +130,14 @@ fun GameScreen(state: AppState) {
     }
 
     if (!resultDismissed) {
-        (game.outcome as? GameOutcome.Winner)?.let {
-            GameOverDialog(state, game, it.seat, restartAndClose) { resultDismissed = true }
-        }
-        if (game.outcome is GameOutcome.Draw) {
-            GameOverDialog(state, game, null, restartAndClose) { resultDismissed = true }
+        game.outcome?.let { outcome ->
+            GameOverDialog(
+                state = state,
+                game = game,
+                winners = outcome.winningSeats,
+                onRestart = restartAndClose,
+                onSeeBoard = { resultDismissed = true },
+            )
         }
     }
 }
@@ -216,7 +219,7 @@ private fun PlayerPanel(
     val background = player.colour.composeColor()
     val ink = background.readableOn()
     val goesFirst = game.startingSeat == player.seat
-    val hasWon = (game.outcome as? GameOutcome.Winner)?.seat == player.seat
+    val hasWon = player.seat in (game.outcome?.winningSeats ?: emptyList())
     val shape = RoundedCornerShape(12.dp)
     // A player who is out keeps their colour, but drained of it, so the board reads at a
     // glance: whoever still has a colour is still in.
@@ -387,6 +390,18 @@ private fun PlayerPanel(
                                 color = ink,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (beaten > 0) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+
+                    game.alliesOf(player.seat)
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { allies ->
+                            Text(
+                                "with " + allies.joinToString("\u00b7") { "P${it + 1}" },
+                                color = ink,
+                                style = MaterialTheme.typography.labelMedium,
                                 maxLines = 1,
                                 softWrap = false,
                             )
@@ -929,18 +944,26 @@ private fun StepperButton(label: String, onStep: () -> Unit) {
 private fun GameOverDialog(
     state: AppState,
     game: GameState,
-    winningSeat: Int?,
+    winners: List<Int>,
     onRestart: () -> Unit,
     onSeeBoard: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onSeeBoard,
-        title = { Text(if (winningSeat == null) "A draw" else "${game.player(winningSeat).name} wins") },
+        title = {
+            Text(
+                when {
+                    winners.isEmpty() -> "A draw"
+                    winners.size == 1 -> "${game.player(winners.single()).name} wins"
+                    else -> winners.joinToString(" and ") { game.player(it).name } + " win"
+                },
+            )
+        },
         text = {
             Column {
                 game.players.sortedBy { it.seat }.forEach { player ->
                     Text(
-                        if (player.seat == winningSeat) "${player.name} — won"
+                        if (player.seat in winners) "${player.name} — won"
                         else "${player.name} — ${player.lostTo.describe(game)}",
                     )
                 }

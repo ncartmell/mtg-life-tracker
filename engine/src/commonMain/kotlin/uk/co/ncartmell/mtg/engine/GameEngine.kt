@@ -53,15 +53,29 @@ object GameEngine {
         },
     )
 
-    /** Adds [delta] to a player's life. Negative values are damage. */
+    /**
+     * Adds [delta] to a player's life. Negative values are damage.
+     *
+     * In a format where a team shares one life total, both halves of the team move
+     * together — the total belongs to the team, and is merely displayed twice.
+     */
     fun adjustLife(state: GameState, seat: Int, delta: Int): GameState =
-        updatePlayer(state, seat) { it.copy(life = it.life + delta) }
+        if (state.settings.format.sharesLife) {
+            updateTeam(state, seat) { it.copy(life = it.life + delta) }
+        } else {
+            updatePlayer(state, seat) { it.copy(life = it.life + delta) }
+        }
 
     /** Adds [delta] poison counters. */
     fun adjustPoison(state: GameState, seat: Int, delta: Int): GameState {
         if (!state.settings.poisonEnabled) return state
-        return updatePlayer(state, seat) {
+        val block: (PlayerState) -> PlayerState = {
             it.copy(poison = (it.poison + delta).coerceAtLeast(0))
+        }
+        return if (state.settings.format.sharesLife) {
+            updateTeam(state, seat, block)
+        } else {
+            updatePlayer(state, seat, block)
         }
     }
 
@@ -230,6 +244,21 @@ object GameEngine {
 
     // --- internals -------------------------------------------------------------------
 
+    /** Applies a change to every seat on a team at once, for formats that share a total. */
+    private fun updateTeam(
+        state: GameState,
+        seat: Int,
+        block: (PlayerState) -> PlayerState,
+    ): GameState {
+        val target = state.player(seat)
+        if (target.isOut || state.isFinished) return state
+        val team = state.teamOf(seat)
+        val next = state.copy(
+            players = state.players.map { if (state.teamOf(it.seat) == team) block(it) else it },
+        )
+        return applyEliminations(next)
+    }
+
     private fun updatePlayer(
         state: GameState,
         seat: Int,
@@ -289,7 +318,17 @@ object GameEngine {
      */
     private fun resolveOutcome(state: GameState): GameState {
         val alive = state.livePlayers
-        if (state.settings.starFormat) {
+        if (state.settings.format.isTeamGame) {
+            val standing = state.teams.filterNot { state.teamIsOut(it) }
+            return when {
+                standing.size == 1 -> state.copy(
+                    outcome = GameOutcome.TeamWin(state.seatsInTeam(standing.single())),
+                )
+                standing.isEmpty() -> state.copy(outcome = GameOutcome.Draw)
+                else -> state.copy(outcome = null)
+            }
+        }
+        if (state.settings.format == Format.STAR) {
             val byStar = alive.filter { player ->
                 state.starOpponents(player.seat).all { state.player(it).isOut }
             }

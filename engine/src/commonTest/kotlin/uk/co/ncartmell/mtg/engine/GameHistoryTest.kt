@@ -30,7 +30,7 @@ class GameHistoryTest {
 
         assertEquals(42, record.playedAt)
         assertEquals(3, record.seats.size)
-        assertEquals(0, record.winningSeat)
+        assertEquals(listOf(0), record.winningSeats)
         assertEquals("a", record.winner?.profileId)
         assertEquals(LossReason.Conceded, record.seats[1].lostTo)
         assertNull(record.seats[0].lostTo)

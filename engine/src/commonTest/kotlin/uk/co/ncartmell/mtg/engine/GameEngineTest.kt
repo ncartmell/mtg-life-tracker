@@ -161,7 +161,7 @@ class GameEngineTest {
     // --- star ------------------------------------------------------------------------
 
     private fun starGame() = GameEngine.newGame(
-        GameSettings(playerCount = 5, startingLife = 20, starFormat = true),
+        GameSettings(playerCount = 5, startingLife = 20, format = Format.STAR),
         seats(5),
     )
 
@@ -244,7 +244,7 @@ class GameEngineTest {
     @Test
     fun `star only applies to a five player game`() {
         assertFailsWith<IllegalArgumentException> {
-            GameSettings(playerCount = 4, startingLife = 20, starFormat = true)
+            GameSettings(playerCount = 4, startingLife = 20, format = Format.STAR)
         }
     }
 

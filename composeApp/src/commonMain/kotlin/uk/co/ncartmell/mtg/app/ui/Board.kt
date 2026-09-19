@@ -1,6 +1,7 @@
 package uk.co.ncartmell.mtg.app.ui
 
 import androidx.compose.ui.graphics.Color
+import uk.co.ncartmell.mtg.engine.Format
 import uk.co.ncartmell.mtg.engine.PlayerColour
 
 /**
@@ -34,7 +35,42 @@ data class BoardRow(val seats: List<BoardSeat>)
  * panel in a 2x2 grid is roughly twice as tall as it is wide, so that is roughly twice
  * the room for a life total.
  */
-fun boardLayout(playerCount: Int, star: Boolean = false): List<BoardRow> {
+fun boardLayout(playerCount: Int, format: Format = Format.FREE_FOR_ALL): List<BoardRow> {
+    // Teams sit together, so a team format seats each side facing its own edge: partners
+    // shoulder to shoulder, opponents across the table. Reading the board tells you who
+    // is on whose side without consulting anything.
+    if (format == Format.TWO_HEADED_GIANT && playerCount == 4) {
+        return listOf(
+            BoardRow(listOf(BoardSeat(0, Facing.TOP), BoardSeat(1, Facing.TOP))),
+            BoardRow(listOf(BoardSeat(2, Facing.BOTTOM), BoardSeat(3, Facing.BOTTOM))),
+        )
+    }
+    if (format == Format.EMPEROR && playerCount == 6) {
+        return listOf(
+            BoardRow(
+                listOf(
+                    BoardSeat(0, Facing.TOP),
+                    BoardSeat(1, Facing.TOP),
+                    BoardSeat(2, Facing.TOP),
+                ),
+            ),
+            BoardRow(
+                listOf(
+                    BoardSeat(3, Facing.BOTTOM),
+                    BoardSeat(4, Facing.BOTTOM),
+                    BoardSeat(5, Facing.BOTTOM),
+                ),
+            ),
+        )
+    }
+    // The archenemy takes the whole near edge, with the alliance ranged opposite.
+    if (format == Format.ARCHENEMY) {
+        return listOf(
+            BoardRow((1 until playerCount).map { BoardSeat(it, Facing.TOP) }),
+            BoardRow(listOf(BoardSeat(0, Facing.BOTTOM))),
+        )
+    }
+    val star = format == Format.STAR
     // Star only makes sense if you can see who is next to whom, so its five seats are
     // laid out as the points of a star rather than as two rows: one at the top, two down
     // each side. Read clockwise from the top and seat order is the seating order, which
