@@ -6,6 +6,9 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -31,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -57,6 +61,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -189,6 +195,7 @@ private fun BoardMenu(
     onOpenRoll: () -> Unit,
 ) {
     AlertDialog(
+        modifier = rememberMenuEntry(),
         onDismissRequest = onDismiss,
         title = { Text("Game") },
         text = {
@@ -255,9 +262,23 @@ private fun PlayerPanel(
     val shape = RoundedCornerShape(12.dp)
     // A player who is out keeps their colour, but drained of it, so the board reads at a
     // glance: whoever still has a colour is still in.
+    // The step back below only makes sense while some panel is being stepped back *from*.
+    // Before the first turn, after somebody has won, and in the gap after the player whose
+    // turn it is gets knocked out, there is no such panel — and dimming all of them at
+    // once, with nothing left bright, just reads as a broken board.
+    val turnInProgress = game.outcome == null &&
+        game.turnSeat?.let { !game.player(it).isOut } == true
+    val isTheirTurn = turnInProgress && game.turnSeat == player.seat && !player.isOut
     val cardColour by animateColorAsState(
-        targetValue = if (player.isOut) background.drained() else background,
-        animationSpec = tween(450),
+        targetValue = when {
+            player.isOut -> background.drained()
+            // Whose turn it is, said with the card rather than a word on it: theirs is
+            // the only panel at full strength, and the table reads that from across the
+            // room without anybody having to find a label.
+            !turnInProgress || isTheirTurn -> background
+            else -> background.resting()
+        },
+        animationSpec = tween(400),
         label = "card",
     )
 
@@ -271,10 +292,26 @@ private fun PlayerPanel(
         label = "ring",
     )
 
+    // A drag on the middle column opens this player's detail. While that drag is live the
+    // card says so: it draws back a little and lifts off the board, so a gesture that has
+    // begun looks different from a touch that has not.
+    var grabbed by remember { mutableStateOf(false) }
+    val grabScale by animateFloatAsState(
+        targetValue = if (grabbed) 0.965f else 1f,
+        animationSpec = tween(140),
+        label = "grab",
+    )
+    val grabLift by animateDpAsState(
+        targetValue = if (grabbed) 10.dp else 0.dp,
+        animationSpec = tween(140),
+        label = "lift",
+    )
+
     Card(
-        modifier = modifier,
+        modifier = modifier.scale(grabScale),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = cardColour),
+        elevation = CardDefaults.cardElevation(defaultElevation = grabLift),
     ) {
         val paint = if (player.isOut) null else player.style.brushFor(cardColour)
         BoxWithConstraints(
@@ -317,7 +354,12 @@ private fun PlayerPanel(
             // whole right third puts one on, so nobody has to hit a glyph mid-game. The
             // middle third does nothing, so the card can still be touched safely. This sits
             // under the content, which only steals the taps it has a button for.
-            if (!player.isOut) {
+            if (player.isOut) {
+                // Nothing here to adjust, so the whole card opens the detail. Without
+                // this a player who is out has no target at all — the life columns are
+                // gone and the swipe lived on the middle one, which left no way back in.
+                Box(Modifier.fillMaxSize().clickable { openDetail() })
+            } else {
                 Row(Modifier.fillMaxSize()) {
                     Box(
                         Modifier.weight(1f).fillMaxHeight()
@@ -333,7 +375,27 @@ private fun PlayerPanel(
                     Box(
                         Modifier.weight(1f).fillMaxHeight()
                             .pointerInput(Unit) {
-                                detectDragGestures { _, _ -> openDetail() }
+                                // Opening on the very first delta left no room for the
+                                // panel to show that anything was happening — the dialog
+                                // was simply there. A short threshold gives the card time
+                                // to react, and stops a stray twitch from opening it.
+                                val threshold = 24.dp.toPx()
+                                var travelled = Offset.Zero
+                                detectDragGestures(
+                                    onDragStart = {
+                                        travelled = Offset.Zero
+                                        grabbed = true
+                                    },
+                                    onDragEnd = { grabbed = false },
+                                    onDragCancel = { grabbed = false },
+                                ) { _, delta ->
+                                    travelled += delta
+                                    if (travelled.getDistance() > threshold) {
+                                        travelled = Offset.Zero
+                                        grabbed = false
+                                        openDetail()
+                                    }
+                                }
                             },
                     )
                     Box(
@@ -341,6 +403,26 @@ private fun PlayerPanel(
                             .repeatingPress { state.adjustLife(player.seat, 1) },
                     )
                 }
+            }
+
+            // Whose turn it is, marked on the card. The colour step below carries most of
+            // it, but it cannot carry all of it: a player whose colour is already close to
+            // the board's own dark has nowhere to recede to, so on their turn the board
+            // would not change at all. The bar is drawn in the card's ink, which is picked
+            // to contrast with that card whatever colour it is, so it reads on all five.
+            val barWidth by animateDpAsState(
+                targetValue = if (isTheirTurn) (if (tight) 30.dp else 44.dp) else 0.dp,
+                animationSpec = tween(220),
+                label = "turnBar",
+            )
+            if (barWidth > 0.dp) {
+                Box(
+                    Modifier.align(Alignment.TopCenter)
+                        .padding(top = 5.dp)
+                        .width(barWidth)
+                        .height(4.dp)
+                        .background(ink, RoundedCornerShape(2.dp)),
+                )
             }
 
             // Overlaid rather than stacked. Stacking centred the total in whatever was
@@ -496,17 +578,6 @@ private fun PlayerPanel(
                                 softWrap = false,
                             )
                         }
-
-                    if (game.turnSeat == player.seat && !player.isOut) {
-                        Text(
-                            "TURN " + game.turnCount,
-                            color = ink,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
 
                     if (player.cannotLose) {
                         Text(
@@ -904,6 +975,48 @@ private fun OutMark(ink: Color, size: androidx.compose.ui.unit.Dp) {
 }
 
 /**
+ * The rise and scale a menu opens on.
+ *
+ * Without it a dialog simply exists on the next frame, and after a swipe that reads as the
+ * board having jumped rather than as the panel having opened — the gesture and the thing
+ * it produced look unrelated. Applied to the dialog's own surface, so the scrim behind it
+ * still comes in flat.
+ */
+@Composable
+private fun rememberMenuEntry(): Modifier {
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        appear.animateTo(1f, animationSpec = tween(220, easing = FastOutSlowInEasing))
+    }
+    return Modifier.graphicsLayer {
+        alpha = appear.value
+        val grow = 0.90f + 0.10f * appear.value
+        scaleX = grow
+        scaleY = grow
+        translationY = (1f - appear.value) * 20.dp.toPx()
+    }
+}
+
+/** The board behind the panels; both steps below move a colour towards it. */
+private const val BOARD_R = 0.078f
+private const val BOARD_G = 0.086f
+private const val BOARD_B = 0.102f
+
+/**
+ * A panel waiting its turn: still plainly itself, just a step back towards the board.
+ *
+ * A straight lerp, not a multiply with a lift. The lift was there to stop colours going
+ * muddy, but it very nearly cancelled the multiply for a colour that was already dark —
+ * the grey-purple panel moved by one part in eighty, which on screen is nothing at all.
+ */
+private fun Color.resting(): Color = Color(
+    red = red * 0.58f + BOARD_R * 0.42f,
+    green = green * 0.58f + BOARD_G * 0.42f,
+    blue = blue * 0.58f + BOARD_B * 0.42f,
+    alpha = alpha,
+)
+
+/**
  * A colour drained toward the board behind it — keeps the hue, loses the life.
  *
  * Alpha would have done this too, but alpha dimmed the winner's ring and the "OUT" mark
@@ -985,6 +1098,7 @@ private fun PlayerDetailDialog(
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
+        modifier = rememberMenuEntry(),
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
         title = {

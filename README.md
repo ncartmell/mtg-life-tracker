@@ -185,5 +185,6 @@ start mid-game is worse.
 ## Not done yet
 
 - No undo history beyond restoring an eliminated player
-- No per-game history; only the running win/loss totals are kept
-- Two-headed giant and other team formats are not modelled
+- Nothing is synced or shared between devices; each install keeps its own profiles,
+  leaderboard and game history
+- The iOS build is unsigned, so it needs re-signing before it will install
