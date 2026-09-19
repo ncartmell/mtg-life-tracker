@@ -39,6 +39,7 @@ import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.Screen
 import uk.co.ncartmell.mtg.engine.Format
 import uk.co.ncartmell.mtg.engine.GameSettings
+import uk.co.ncartmell.mtg.engine.PanelStyle
 import uk.co.ncartmell.mtg.engine.PlayerColour
 import uk.co.ncartmell.mtg.engine.SeatSetup
 
@@ -48,6 +49,7 @@ fun SetupScreen(state: AppState) {
     var startingLife by remember { mutableStateOf(40) }
     var commanderDamage by remember { mutableStateOf(true) }
     var poison by remember { mutableStateOf(true) }
+    var planechase by remember { mutableStateOf(false) }
     var format by remember { mutableStateOf(Format.FREE_FOR_ALL) }
 
     // Seat assignments, indexed by seat. Null profile means a guest.
@@ -121,6 +123,15 @@ fun SetupScreen(state: AppState) {
             Section("Rules") {
                 ToggleRow("Commander damage", commanderDamage) { commanderDamage = it }
                 ToggleRow("Poison counters", poison) { poison = it }
+                ToggleRow("Planechase", planechase) { planechase = it }
+                if (planechase) {
+                    Text(
+                        "Adds the planar die and a note of whichever plane is in play. " +
+                            "Layers over whatever format you are playing.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
             }
         }
@@ -143,6 +154,8 @@ fun SetupScreen(state: AppState) {
 
         item { AddProfileCard(state) }
 
+        item { ProfileTrimmings(state) }
+
         item {
             Button(
                 onClick = {
@@ -152,6 +165,7 @@ fun SetupScreen(state: AppState) {
                         commanderDamageEnabled = commanderDamage,
                         poisonEnabled = poison,
                         format = format,
+                        planechase = planechase,
                         poisonThreshold = GameSettings.defaultsFor(format).poisonThreshold,
                     )
                     val seats = (0 until playerCount).map { seat ->
@@ -161,6 +175,8 @@ fun SetupScreen(state: AppState) {
                             colour = profile?.colour ?: PlayerColour.entries[seat],
                             profileId = profile?.id,
                             commanderCount = if (commanderDamage) seatCommanders[seat] else 1,
+                            defeatMessage = profile?.defeatMessage,
+                            style = profile?.style ?: PanelStyle.SOLID,
                         )
                     }
                     state.startGame(settings, seats)
@@ -209,6 +225,56 @@ private fun SeatCard(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Everything about a saved profile that is not its name: how its panel is painted, and
+ * what it says when the player is knocked out.
+ */
+@Composable
+private fun ProfileTrimmings(state: AppState) {
+    val profiles = state.book.profiles
+    if (profiles.isEmpty()) return
+
+    var editing by remember { mutableStateOf(profiles.first().id) }
+    val profile = profiles.firstOrNull { it.id == editing } ?: profiles.first()
+    var message by remember(profile.id) { mutableStateOf(profile.defeatMessage.orEmpty()) }
+
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Personalise a profile", fontWeight = FontWeight.SemiBold)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                profiles.forEach {
+                    Chip(
+                        label = it.name,
+                        selected = it.id == profile.id,
+                        tint = it.colour.composeColor(),
+                    ) { editing = it.id }
+                }
+            }
+
+            Text("Panel", style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PanelStyle.entries.forEach { style ->
+                    Chip(style.label, selected = profile.style == style) {
+                        state.setPanelStyle(profile.id, style)
+                    }
+                }
+            }
+
+            OutlinedTextField(
+                value = message,
+                onValueChange = {
+                    message = it
+                    state.setDefeatMessage(profile.id, it)
+                },
+                label = { Text("What their panel says when they lose") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

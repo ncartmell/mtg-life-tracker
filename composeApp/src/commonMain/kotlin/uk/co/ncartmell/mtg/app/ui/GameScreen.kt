@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -31,7 +32,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +46,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -61,8 +65,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.KeepScreenAwake
+import uk.co.ncartmell.mtg.app.store.nowMillis
 import uk.co.ncartmell.mtg.app.Screen
 import uk.co.ncartmell.mtg.engine.CommanderId
+import uk.co.ncartmell.mtg.engine.Counter
+import uk.co.ncartmell.mtg.engine.PanelStyle
+import uk.co.ncartmell.mtg.engine.PlanarFace
 import uk.co.ncartmell.mtg.engine.GameOutcome
 import uk.co.ncartmell.mtg.engine.GameState
 import uk.co.ncartmell.mtg.engine.LossReason
@@ -173,15 +181,27 @@ private fun BoardMenu(
         title = { Text("Game") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Available whether or not anyone rolled: knowing who starts is useful,
+                // but it should not be the price of counting turns at all.
                 game.turnSeat?.let { seat ->
                     Text(
                         "Turn ${game.turnCount} — ${game.player(seat).name}",
                         fontWeight = FontWeight.Medium,
                     )
-                    Button(
-                        onClick = { state.nextTurn(); onDismiss() },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Pass the turn") }
+                }
+                Button(
+                    onClick = { state.nextTurn(); onDismiss() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (game.turnSeat == null) "Start turn one" else "Pass the turn") }
+
+                game.startedAt?.let { started ->
+                    val now = tickingNow()
+                    Text(
+                        "Game " + elapsed(now - started) +
+                            (game.turnStartedAt?.let { "  ·  turn " + elapsed(now - it) } ?: ""),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
                 OutlinedButton(
@@ -230,6 +250,7 @@ private fun PlayerPanel(
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = cardColour),
     ) {
+        val paint = if (player.isOut) null else player.style.brushFor(cardColour)
         BoxWithConstraints(
             // Whoever won the roll gets a ring rather than a label: at six players a panel
             // is a third of the screen wide and a label is the first thing to get clipped.
@@ -240,6 +261,7 @@ private fun PlayerPanel(
             // sat against the near-black board and vanished. Every other seat has a light
             // ink, which is why only seat one looked like it was never highlighted.
             Modifier.fillMaxSize()
+                .then(paint?.let { Modifier.background(it) } ?: Modifier)
                 .padding(RING_INSET)
                 .then(
                     when {
@@ -265,6 +287,8 @@ private fun PlayerPanel(
                 else -> if (tight) 20.sp else 30.sp
             }
 
+            val openDetail = onOpenDetail
+
             // Forgiving targets: the whole left third of a panel takes a life off and the
             // whole right third puts one on, so nobody has to hit a glyph mid-game. The
             // middle third does nothing, so the card can still be touched safely. This sits
@@ -275,7 +299,19 @@ private fun PlayerPanel(
                         Modifier.weight(1f).fillMaxHeight()
                             .repeatingPress { state.adjustLife(player.seat, -1) },
                     )
-                    Box(Modifier.weight(1f).fillMaxHeight())
+                    // The middle column changes nothing, so it is free to carry the
+                    // gesture that opens this player's detail. Swiping here cannot be
+                    // confused with a life change, because nothing here alters life.
+                    //
+                    // Any direction, not just vertical: the panel is rotated to face its
+                    // player, and that rotates the gesture with it — a swipe up the screen
+                    // arrives here as a sideways drag on a panel turned a quarter turn.
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .pointerInput(Unit) {
+                                detectDragGestures { _, _ -> openDetail() }
+                            },
+                    )
                     Box(
                         Modifier.weight(1f).fillMaxHeight()
                             .repeatingPress { state.adjustLife(player.seat, 1) },
@@ -303,7 +339,7 @@ private fun PlayerPanel(
                                 style = MaterialTheme.typography.titleMedium,
                             )
                             Text(
-                                player.lostTo.describe(game),
+                                player.defeatMessage ?: player.lostTo.describe(game),
                                 color = ink,
                                 textAlign = TextAlign.Center,
                                 style = MaterialTheme.typography.labelMedium,
@@ -357,9 +393,12 @@ private fun PlayerPanel(
 
                 Row(
                     Modifier.fillMaxWidth().align(Alignment.TopCenter),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // No button here any more: the name gets the whole row, and the
+                    // detail opens by swiping the middle of the panel. The button's
+                    // minimum width was what truncated "Player 3" to "Player".
                     Text(
                         player.name + if (goesFirst && !tight) " \u00b7 first" else "",
                         color = ink,
@@ -370,7 +409,8 @@ private fun PlayerPanel(
                         else MaterialTheme.typography.titleSmall,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    MoreButton(ink, tight, onOpenDetail)
+                    if (game.monarchSeat == player.seat) TokenBadge("Monarch", ink, tight)
+                    if (game.initiativeSeat == player.seat) TokenBadge("Initiative", ink, tight)
                 }
 
                 FlowRow(
@@ -431,6 +471,10 @@ private fun PlayerPanel(
 
                     game.lastRoll?.openingRoll?.get(player.seat)?.let { rolled ->
                         Counter("Roll", rolled, null, ink)
+                    }
+
+                    player.activeCounters.forEach { (counter, value) ->
+                        Counter(counter.short, value, null, ink)
                     }
 
                     // Like commander damage: shown once it exists, not as a standing zero.
@@ -528,6 +572,44 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                         .background(MaterialTheme.colorScheme.outline),
                 )
 
+                if (game.settings.planechase) {
+                    Text("Planechase", fontWeight = FontWeight.SemiBold)
+                    game.currentPlane?.let {
+                        Text(
+                            "$it  ·  ${game.planeswalks} planeswalks",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Button(
+                        onClick = state::rollPlanarDie,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Roll the planar die") }
+                    state.lastPlanarFace?.let { face ->
+                        Text(
+                            face.label,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = when (face) {
+                                PlanarFace.BLANK -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.primary
+                            },
+                        )
+                    }
+                    var plane by remember { mutableStateOf(game.currentPlane.orEmpty()) }
+                    OutlinedTextField(
+                        value = plane,
+                        onValueChange = { plane = it },
+                        label = { Text("Plane in play") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedButton(
+                        onClick = { state.planeswalkTo(plane) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Planeswalk here") }
+                }
+
                 Text("Dice", fontWeight = FontWeight.SemiBold)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -623,6 +705,36 @@ private fun Modifier.facing(facing: Facing): Modifier = when (facing) {
 }
 
 /** The winner's ring, kept clear of the card's edge so it never meets the board behind. */
+/**
+ * Wall-clock now, refreshed once a second while anything is reading it.
+ *
+ * Only composed inside the menu, so nothing ticks while the board is up — a timer that
+ * recomposes the whole board every second is a timer that flattens the battery.
+ */
+@Composable
+private fun tickingNow(): Long {
+    var now by remember { mutableStateOf(nowMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            now = nowMillis()
+        }
+    }
+    return now
+}
+
+/** Milliseconds as m:ss, or h:mm:ss once a game has been going that long. */
+private fun elapsed(millis: Long): String {
+    val total = (millis / 1000).coerceAtLeast(0)
+    val seconds = total % 60
+    val minutes = (total / 60) % 60
+    val hours = total / 3600
+    val ss = if (seconds < 10) "0$seconds" else "$seconds"
+    if (hours == 0L) return "$minutes:$ss"
+    val mm = if (minutes < 10) "0$minutes" else "$minutes"
+    return "$hours:$mm:$ss"
+}
+
 private val RING_INSET = 3.dp
 private val RING_WIDTH = 3.dp
 private val WIN_RING_WIDTH = 6.dp
@@ -665,31 +777,49 @@ private fun Modifier.repeatingPress(onStep: () -> Unit): Modifier {
     }
 }
 
-/**
- * "More" spelled out where there is room, and three dots where there is not.
- *
- * At five and six players a panel is a third of the screen wide, and the word competes
- * with the player's name for that width — which is how "Player 3" became "Player".
- */
+/** A held token — the monarchy, the initiative — marked on whoever has it. */
 @Composable
-private fun MoreButton(ink: Color, tight: Boolean, onClick: () -> Unit) {
-    // A plain box, not a TextButton: the button's 58dp minimum width is wider than the
-    // dots and was taking the room the name needed, which is what truncated it.
+private fun TokenBadge(label: String, ink: Color, tight: Boolean) {
     Box(
-        Modifier.clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        contentAlignment = Alignment.Center,
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .border(1.dp, ink, RoundedCornerShape(6.dp))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
     ) {
-        if (tight) {
-            Row(horizontalArrangement = Arrangement.spacedBy(2.5.dp)) {
-                repeat(3) { Box(Modifier.size(3.5.dp).clip(CircleShape).background(ink)) }
-            }
-        } else {
-            Text("More", color = ink, style = MaterialTheme.typography.labelMedium)
-        }
+        Text(
+            if (tight) label.take(1) else label,
+            color = ink,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
+
+/**
+ * How a panel is painted over its base colour.
+ *
+ * Ten colours run out before ten players do, and two people on neighbouring shades of
+ * blue is a real way to misread a board, so a profile can also choose how its panel is
+ * shaded. Kept to gradients of the player's own colour rather than images: an image
+ * picker is a per-platform lift, and this needs no permissions and no storage.
+ */
+private fun PanelStyle.brushFor(base: Color): Brush? = when (this) {
+    PanelStyle.SOLID -> null
+    PanelStyle.FADE -> Brush.verticalGradient(
+        listOf(base.shade(1.18f), base, base.shade(0.82f)),
+    )
+    PanelStyle.CORNER -> Brush.linearGradient(
+        listOf(base.shade(1.22f), base, base.shade(0.86f)),
+    )
+}
+
+private fun Color.shade(factor: Float): Color = Color(
+    red = (red * factor).coerceIn(0f, 1f),
+    green = (green * factor).coerceIn(0f, 1f),
+    blue = (blue * factor).coerceIn(0f, 1f),
+    alpha = alpha,
+)
 
 /**
  * A crossed-out circle, drawn rather than iconed so it needs no icon dependency and no
@@ -847,6 +977,38 @@ private fun PlayerDetailDialog(
                                 ) { Text("$count") }
                             }
                         }
+                    }
+                }
+
+                Text("Counters", fontWeight = FontWeight.SemiBold)
+                Counter.entries.forEach { counter ->
+                    Adjuster(
+                        label = "${counter.label} (${player[counter]})",
+                        onMinus = { state.adjustCounter(player.seat, counter, -1) },
+                        onPlus = { state.adjustCounter(player.seat, counter, 1) },
+                    )
+                }
+
+                Text("Who holds what", fontWeight = FontWeight.SemiBold)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val isMonarch = game.monarchSeat == player.seat
+                    val hasInitiative = game.initiativeSeat == player.seat
+                    if (isMonarch) {
+                        Button(onClick = { state.setMonarch(null) }) { Text("Monarch") }
+                    } else {
+                        OutlinedButton(
+                            onClick = { state.setMonarch(player.seat) },
+                        ) { Text("Take monarchy") }
+                    }
+                    if (hasInitiative) {
+                        Button(onClick = { state.setInitiative(null) }) { Text("Initiative") }
+                    } else {
+                        OutlinedButton(
+                            onClick = { state.setInitiative(player.seat) },
+                        ) { Text("Take initiative") }
                     }
                 }
 

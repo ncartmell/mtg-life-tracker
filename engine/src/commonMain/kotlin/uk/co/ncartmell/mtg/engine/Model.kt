@@ -30,11 +30,37 @@ data class PlayerProfile(
     val colour: PlayerColour,
     val wins: Int = 0,
     val losses: Int = 0,
+    /** Shown in place of the usual reason when this player is knocked out. */
+    val defeatMessage: String? = null,
+    val style: PanelStyle = PanelStyle.SOLID,
 ) {
     val gamesPlayed: Int get() = wins + losses
 
     /** Win rate in the range 0.0..1.0, or null when the player has not finished a game. */
     val winRate: Double? get() = if (gamesPlayed == 0) null else wins.toDouble() / gamesPlayed
+}
+
+/**
+ * Counters a player accumulates that do not, on their own, end their game.
+ *
+ * Poison is deliberately not here: it is a loss condition with a threshold, and the
+ * engine has to act on it. These are numbers a player needs to remember, which is a
+ * different job — the engine keeps them and otherwise leaves them alone.
+ */
+@Serializable
+enum class Counter(val label: String, val short: String) {
+    ENERGY("Energy", "E"),
+    EXPERIENCE("Experience", "XP"),
+    STORM("Storm", "Storm"),
+    COMMANDER_TAX("Commander tax", "Tax"),
+}
+
+/** How a player's panel is painted, so two people on similar colours still differ. */
+@Serializable
+enum class PanelStyle(val label: String) {
+    SOLID("Solid"),
+    FADE("Fade"),
+    CORNER("Corner"),
 }
 
 /** Identifies one of a player's commanders — a seat may have two. */
@@ -137,6 +163,8 @@ data class GameSettings(
     val startingLife: Int,
     val commanderDamageEnabled: Boolean = true,
     val poisonEnabled: Boolean = true,
+    /** Planechase layers over any format: a planar die, and whatever plane is in play. */
+    val planechase: Boolean = false,
     val format: Format = Format.FREE_FOR_ALL,
     val poisonThreshold: Int = 10,
     val commanderDamageThreshold: Int = 21,
@@ -205,6 +233,11 @@ data class PlayerState(
     val commanderCount: Int = 1,
     /** Damage received, keyed by the commander that dealt it. */
     val commanderDamage: Map<CommanderId, Int> = emptyMap(),
+    /** Everything else worth remembering. Absent means zero. */
+    val counters: Map<Counter, Int> = emptyMap(),
+    /** Copied from the profile when the game starts, so it survives a profile edit. */
+    val defeatMessage: String? = null,
+    val style: PanelStyle = PanelStyle.SOLID,
     /**
      * Set while an effect says this player cannot lose the game — Platinum Angel and the
      * like. Counters keep climbing underneath it; they are simply not acted on.
@@ -222,6 +255,14 @@ data class PlayerState(
     val highestCommanderDamage: Int get() = commanderDamage.values.maxOrNull() ?: 0
 
     fun damageFrom(commander: CommanderId): Int = commanderDamage[commander] ?: 0
+
+    operator fun get(counter: Counter): Int = counters[counter] ?: 0
+
+    /** Only the counters in play, so a panel stays empty until one is actually used. */
+    val activeCounters: List<Pair<Counter, Int>>
+        get() = Counter.entries.mapNotNull { c ->
+            (counters[c] ?: 0).takeIf { it != 0 }?.let { c to it }
+        }
 }
 
 /** A game in progress, or finished. */
@@ -236,6 +277,23 @@ data class GameState(
     val turnSeat: Int? = null,
     /** How many turns have been taken in total, counting the first. */
     val turnCount: Int = 0,
+    /**
+     * Who holds the monarchy and the initiative. Both are single-holder and both move
+     * about, so the game holds them rather than any player.
+     */
+    val monarchSeat: Int? = null,
+    val initiativeSeat: Int? = null,
+    /**
+     * When the game and the current turn began, in epoch millis.
+     *
+     * Wall-clock time is handed in rather than read: an engine that can tell the time is
+     * one whose tests depend on when they run.
+     */
+    val startedAt: Long? = null,
+    val turnStartedAt: Long? = null,
+    /** Planechase: whatever plane is in play, named by whoever is running the game. */
+    val currentPlane: String? = null,
+    val planeswalks: Int = 0,
     val outcome: GameOutcome? = null,
 ) {
     val isFinished: Boolean get() = outcome != null
@@ -326,6 +384,19 @@ data class DiceRoll(
 
     /** The number that actually won, which is from the last round when there was a tie. */
     val winningRoll: Int get() = rounds.last()[winningSeat] ?: 0
+}
+
+/**
+ * A face of the planar die: four blanks, one chaos, one planeswalk.
+ *
+ * Modelled as its own roll rather than as a d6 with a lookup, because the faces are what
+ * a player acts on — nobody cares that blank happens to be four of the six.
+ */
+@Serializable
+enum class PlanarFace(val label: String) {
+    BLANK("No effect"),
+    CHAOS("Chaos"),
+    PLANESWALK("Planeswalk"),
 }
 
 /** A roll of dice made for its own sake, rather than to decide who starts. */

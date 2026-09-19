@@ -12,7 +12,11 @@ import kotlin.random.Random
 object GameEngine {
 
     /** Builds the opening state. Seating order is the order of [seats]. */
-    fun newGame(settings: GameSettings, seats: List<SeatSetup>): GameState {
+    fun newGame(
+        settings: GameSettings,
+        seats: List<SeatSetup>,
+        startedAt: Long? = null,
+    ): GameState {
         require(seats.size == settings.playerCount) {
             "Expected ${settings.playerCount} seats, got ${seats.size}"
         }
@@ -22,6 +26,8 @@ object GameEngine {
         }
         return GameState(
             settings = settings,
+            startedAt = startedAt,
+            turnStartedAt = startedAt,
             players = seats.mapIndexed { index, seat ->
                 PlayerState(
                     seat = index,
@@ -30,6 +36,8 @@ object GameEngine {
                     profileId = seat.profileId,
                     life = settings.startingLife,
                     commanderCount = seat.commanderCount,
+                    defeatMessage = seat.defeatMessage,
+                    style = seat.style,
                 )
             },
         )
@@ -40,13 +48,16 @@ object GameEngine {
      *
      * The first-player roll is cleared, because who goes first should be decided again.
      */
-    fun restart(state: GameState): GameState = GameState(
+    fun restart(state: GameState, startedAt: Long? = null): GameState = GameState(
         settings = state.settings,
+        startedAt = startedAt,
+        turnStartedAt = startedAt,
         players = state.players.map {
             it.copy(
                 life = state.settings.startingLife,
                 poison = 0,
                 commanderDamage = emptyMap(),
+                counters = emptyMap(),
                 cannotLose = false,
                 lostTo = null,
             )
@@ -106,6 +117,47 @@ object GameEngine {
             )
         }
     }
+
+    /** Adds [delta] to one of a player's counters. Never goes below zero. */
+    fun adjustCounter(state: GameState, seat: Int, counter: Counter, delta: Int): GameState =
+        updatePlayer(state, seat) { player ->
+            val next = (player[counter] + delta).coerceAtLeast(0)
+            player.copy(
+                // Drop it rather than keep a zero, so a panel can show what is in play by
+                // showing whatever is there.
+                counters = if (next == 0) {
+                    player.counters - counter
+                } else {
+                    player.counters + (counter to next)
+                },
+            )
+        }
+
+    /**
+     * Hands the monarchy to a seat, or clears it with null.
+     *
+     * Only one player can hold it, which is the entire rule, so this is a set rather
+     * than a toggle on a player.
+     */
+    fun setMonarch(state: GameState, seat: Int?): GameState =
+        state.copy(monarchSeat = seat?.takeIf { !state.player(it).isOut })
+
+    /** As the monarchy, but for the initiative. */
+    fun setInitiative(state: GameState, seat: Int?): GameState =
+        state.copy(initiativeSeat = seat?.takeIf { !state.player(it).isOut })
+
+    /** Rolls the planar die: four faces do nothing, which is the point of it. */
+    fun rollPlanarDie(random: Random = Random): PlanarFace = when (random.nextInt(1, 7)) {
+        1 -> PlanarFace.CHAOS
+        2 -> PlanarFace.PLANESWALK
+        else -> PlanarFace.BLANK
+    }
+
+    /** Moves to a named plane and counts the walk. */
+    fun planeswalkTo(state: GameState, plane: String): GameState = state.copy(
+        currentPlane = plane.trim().takeIf { it.isNotEmpty() },
+        planeswalks = state.planeswalks + 1,
+    )
 
     /** Sets how many commanders a player has. Damage from a removed commander is dropped. */
     fun setCommanderCount(state: GameState, seat: Int, count: Int): GameState {
@@ -196,7 +248,12 @@ object GameEngine {
      *
      * Ties are re-rolled among the tied players only, which is what people do at a table.
      */
-    fun rollForFirstPlayer(state: GameState, random: Random = Random, sides: Int = 20): GameState {
+    fun rollForFirstPlayer(
+        state: GameState,
+        random: Random = Random,
+        sides: Int = 20,
+        at: Long? = null,
+    ): GameState {
         require(sides > 1) { "A die needs more than one side" }
         var contenders = state.livePlayers.map { it.seat }
         if (contenders.isEmpty()) return state
@@ -214,6 +271,7 @@ object GameEngine {
                     lastRoll = DiceRoll(rounds.toList(), winner),
                     turnSeat = winner,
                     turnCount = 1,
+                    turnStartedAt = at,
                 )
             }
             contenders = winners.toList()
@@ -233,13 +291,21 @@ object GameEngine {
      * Seating order is seat order, and players who are out are skipped rather than given
      * a turn they cannot take.
      */
-    fun nextTurn(state: GameState): GameState {
+    fun nextTurn(state: GameState, at: Long? = null): GameState {
         val live = state.livePlayers.map { it.seat }.sorted()
         if (live.isEmpty() || state.isFinished) return state
         val current = state.turnSeat
-            ?: return state.copy(turnSeat = live.first(), turnCount = state.turnCount + 1)
+            ?: return state.copy(
+                turnSeat = live.first(),
+                turnCount = state.turnCount + 1,
+                turnStartedAt = at,
+            )
         val next = live.firstOrNull { it > current } ?: live.first()
-        return state.copy(turnSeat = next, turnCount = state.turnCount + 1)
+        return state.copy(
+            turnSeat = next,
+            turnCount = state.turnCount + 1,
+            turnStartedAt = at,
+        )
     }
 
     // --- internals -------------------------------------------------------------------
@@ -280,8 +346,16 @@ object GameEngine {
             val reason = detectLoss(player, state.settings)
             if (reason != null) player.copy(lostTo = reason) else player
         }
-        return resolveOutcome(state.copy(players = players)).passTurnIfHolderIsOut()
+        return resolveOutcome(state.copy(players = players))
+            .passTurnIfHolderIsOut()
+            .dropTokensHeldByTheDead()
     }
+
+    /** The monarchy and the initiative do not stay with a player who is out. */
+    private fun GameState.dropTokensHeldByTheDead(): GameState = copy(
+        monarchSeat = monarchSeat?.takeIf { !player(it).isOut },
+        initiativeSeat = initiativeSeat?.takeIf { !player(it).isOut },
+    )
 
     /** Keeps the turn with somebody who can actually take it. */
     private fun GameState.passTurnIfHolderIsOut(): GameState {
@@ -354,4 +428,6 @@ data class SeatSetup(
     val colour: PlayerColour,
     val profileId: String? = null,
     val commanderCount: Int = 1,
+    val defeatMessage: String? = null,
+    val style: PanelStyle = PanelStyle.SOLID,
 )

@@ -7,7 +7,10 @@ import uk.co.ncartmell.mtg.app.store.HistoryRepository
 import uk.co.ncartmell.mtg.app.store.ProfileRepository
 import uk.co.ncartmell.mtg.app.store.createStorage
 import uk.co.ncartmell.mtg.app.store.nowMillis
+import uk.co.ncartmell.mtg.engine.Counter
 import uk.co.ncartmell.mtg.engine.DiceThrow
+import uk.co.ncartmell.mtg.engine.PanelStyle
+import uk.co.ncartmell.mtg.engine.PlanarFace
 import uk.co.ncartmell.mtg.engine.GameHistory
 import uk.co.ncartmell.mtg.engine.CommanderId
 import uk.co.ncartmell.mtg.engine.GameEngine
@@ -46,6 +49,10 @@ class AppState(
     var lastThrow by mutableStateOf<DiceThrow?>(null)
         private set
 
+    /** The last face of the planar die, kept so the board can show it. */
+    var lastPlanarFace by mutableStateOf<PlanarFace?>(null)
+        private set
+
     var game by mutableStateOf<GameState?>(null)
         private set
 
@@ -62,6 +69,18 @@ class AppState(
 
     fun addProfile(name: String, colour: PlayerColour) = mutateBook {
         it.add(name, colour, id = newProfileId())
+    }
+
+    fun setDefeatMessage(id: String, message: String) = mutateBook { book ->
+        book.copy(
+            profiles = book.profiles.map {
+                if (it.id == id) it.copy(defeatMessage = message.trim().ifEmpty { null }) else it
+            },
+        )
+    }
+
+    fun setPanelStyle(id: String, style: PanelStyle) = mutateBook { book ->
+        book.copy(profiles = book.profiles.map { if (it.id == id) it.copy(style = style) else it })
     }
 
     fun setProfileColour(id: String, colour: PlayerColour) = mutateBook { it.setColour(id, colour) }
@@ -84,21 +103,36 @@ class AppState(
     // --- game ------------------------------------------------------------------------
 
     fun startGame(settings: GameSettings, seats: List<SeatSetup>) {
-        game = GameEngine.newGame(settings, seats)
+        game = GameEngine.newGame(settings, seats, startedAt = clock())
         resultRecorded = false
         lastThrow = null
         screen = Screen.Game
     }
 
     fun restart() {
-        updateGame { GameEngine.restart(it) }
+        updateGame { GameEngine.restart(it, startedAt = clock()) }
         resultRecorded = false
         lastThrow = null
+        lastPlanarFace = null
     }
 
-    fun rollForFirstPlayer() = updateGame { GameEngine.rollForFirstPlayer(it, random) }
+    fun rollForFirstPlayer() =
+        updateGame { GameEngine.rollForFirstPlayer(it, random, at = clock()) }
 
-    fun nextTurn() = updateGame { GameEngine.nextTurn(it) }
+    fun nextTurn() = updateGame { GameEngine.nextTurn(it, at = clock()) }
+
+    fun adjustCounter(seat: Int, counter: Counter, delta: Int) =
+        updateGame { GameEngine.adjustCounter(it, seat, counter, delta) }
+
+    fun setMonarch(seat: Int?) = updateGame { GameEngine.setMonarch(it, seat) }
+
+    fun setInitiative(seat: Int?) = updateGame { GameEngine.setInitiative(it, seat) }
+
+    fun rollPlanarDie() {
+        lastPlanarFace = GameEngine.rollPlanarDie(random)
+    }
+
+    fun planeswalkTo(plane: String) = updateGame { GameEngine.planeswalkTo(it, plane) }
 
     fun rollDice(sides: Int, count: Int = 1) {
         lastThrow = GameEngine.rollDice(sides, count, random)
@@ -106,6 +140,7 @@ class AppState(
 
     fun clearThrow() {
         lastThrow = null
+        lastPlanarFace = null
     }
 
     fun adjustLife(seat: Int, delta: Int) = updateGame { GameEngine.adjustLife(it, seat, delta) }
