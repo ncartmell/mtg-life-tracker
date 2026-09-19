@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -225,7 +226,20 @@ private fun SeatCard(
 ) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(seatLabel, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(12.dp).clip(CircleShape).background(
+                        selectedProfileId?.let { state.book[it]?.colour }
+                            ?.composeColor()
+                            ?: PlayerColour.entries[seat].composeColor(),
+                    ),
+                )
+                Text(
+                    seatLabel,
+                    Modifier.padding(start = 8.dp),
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Guest", selected = selectedProfileId == null) { onProfile(null) }
@@ -347,6 +361,10 @@ private fun AddProfileCard(state: AppState) {
 private fun Section(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
+        Box(
+            Modifier.fillMaxWidth().height(1.dp)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+        )
         content()
     }
 }

@@ -7,10 +7,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -60,29 +63,58 @@ fun LeaderboardScreen(state: AppState) {
             Modifier.padding(top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(standings) { profile ->
+            itemsIndexed(standings) { index, profile ->
+                val leading = index == 0 && profile.wins > 0
                 Card(Modifier.fillMaxWidth()) {
                     Row(
-                        Modifier.fillMaxWidth().padding(12.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // A place, not just an order: a list read top to bottom does not
+                        // say who is winning, and that is what a leaderboard is for.
+                        Text(
+                            "${index + 1}",
+                            Modifier.width(22.dp),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (leading) FontWeight.Bold else FontWeight.Normal,
+                            color = if (leading) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
                         Box(
-                            Modifier.size(18.dp).clip(CircleShape)
+                            Modifier.size(if (leading) 22.dp else 18.dp).clip(CircleShape)
                                 .background(profile.colour.composeColor()),
                         )
+                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                            Text(
+                                profile.name,
+                                fontWeight = if (leading) FontWeight.Bold else FontWeight.Medium,
+                                style = if (leading) {
+                                    MaterialTheme.typography.titleMedium
+                                } else {
+                                    MaterialTheme.typography.bodyLarge
+                                },
+                            )
+                            profile.winRate?.let {
+                                Text(
+                                    "${(it * 100).roundToInt()}% of ${profile.gamesPlayed} games",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                         Text(
-                            profile.name,
-                            Modifier.padding(start = 12.dp).weight(1f),
-                            fontWeight = FontWeight.Medium,
+                            "${profile.wins}",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                         Text(
-                            buildString {
-                                append("${profile.wins}W ${profile.losses}L")
-                                profile.winRate?.let {
-                                    append("  ·  ${(it * 100).roundToInt()}%")
-                                }
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
+                            "  /${profile.losses}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -90,11 +122,15 @@ fun LeaderboardScreen(state: AppState) {
 
             if (recent.isNotEmpty()) {
                 item {
-                    Text(
-                        "Recent games",
-                        Modifier.padding(top = 20.dp, bottom = 4.dp),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                    Column(Modifier.padding(top = 20.dp, bottom = 2.dp)) {
+                        Text("Recent games", style = MaterialTheme.typography.titleMedium)
+                        Box(
+                            Modifier.fillMaxWidth().padding(top = 6.dp).height(1.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                                ),
+                        )
+                    }
                 }
                 items(recent) { record -> GameRow(record) }
             }

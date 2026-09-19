@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -986,7 +987,15 @@ private fun PlayerDetailDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-        title = { Text(player.name) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(14.dp).clip(CircleShape)
+                        .background(player.colour.composeColor()),
+                )
+                Text(player.name, Modifier.padding(start = 10.dp))
+            }
+        },
         text = {
             // Five opponents' commander damage plus the Star pairing overran the screen
             // and took the removal buttons with it, so this scrolls.
@@ -995,26 +1004,29 @@ private fun PlayerDetailDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (game.settings.poisonEnabled) {
+                    DialogSection("Poison")
                     Adjuster(
-                        label = "Poison (${player.poison}/${game.settings.poisonThreshold})",
+                        label = "${player.poison} of ${game.settings.poisonThreshold}",
                         onMinus = { state.adjustPoison(player.seat, -1) },
                         onPlus = { state.adjustPoison(player.seat, 1) },
                     )
                 }
 
                 if (game.settings.commanderDamageEnabled) {
-                    Text("Commander damage taken", fontWeight = FontWeight.SemiBold)
+                    DialogSection("Commander damage taken")
                     game.opposingCommanders(player.seat).forEach { commander ->
                         val owner = game.player(commander.seat)
                         val suffix = if (owner.commanderCount > 1) " #${commander.index + 1}" else ""
                         Adjuster(
-                            label = "${owner.name}$suffix — ${player.damageFrom(commander)}",
+                            label = "${owner.name}$suffix",
+                            value = player.damageFrom(commander),
+                            tint = owner.colour.composeColor(),
                             onMinus = { state.adjustCommanderDamage(player.seat, commander, -1) },
                             onPlus = { state.adjustCommanderDamage(player.seat, commander, 1) },
                         )
                     }
 
-                    Text("This player's commanders", fontWeight = FontWeight.SemiBold)
+                    DialogSection("This player's commanders")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(1, 2).forEach { count ->
                             val selected = player.commanderCount == count
@@ -1029,16 +1041,22 @@ private fun PlayerDetailDialog(
                     }
                 }
 
-                Text("Counters", fontWeight = FontWeight.SemiBold)
-                Counter.entries.forEach { counter ->
-                    Adjuster(
-                        label = "${counter.label} (${player[counter]})",
-                        onMinus = { state.adjustCounter(player.seat, counter, -1) },
-                        onPlus = { state.adjustCounter(player.seat, counter, 1) },
-                    )
+                DialogSection("Counters")
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Counter.entries.forEach { counter ->
+                        CounterStepper(
+                            label = counter.label,
+                            value = player[counter],
+                            onMinus = { state.adjustCounter(player.seat, counter, -1) },
+                            onPlus = { state.adjustCounter(player.seat, counter, 1) },
+                        )
+                    }
                 }
 
-                Text("Who holds what", fontWeight = FontWeight.SemiBold)
+                DialogSection("Who holds what")
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1064,7 +1082,7 @@ private fun PlayerDetailDialog(
                 game.starOpponents(player.seat)
                     .takeIf { it.isNotEmpty() }
                     ?.let { opponents ->
-                        Text("Opponents in Star", fontWeight = FontWeight.SemiBold)
+                        DialogSection("Opponents in Star")
                         Text(
                             opponents.joinToString(" and ") { seat ->
                                 game.player(seat).name +
@@ -1095,7 +1113,7 @@ private fun PlayerDetailDialog(
                         Text("Bring back in")
                     }
                 } else {
-                    Text("Remove from the game", fontWeight = FontWeight.SemiBold)
+                    DialogSection("Remove from the game")
                     // Wraps: three buttons do not fit across a dialog on a phone, and a
                     // Row squeezes the last one until its label breaks mid-word.
                     FlowRow(
@@ -1119,12 +1137,79 @@ private fun PlayerDetailDialog(
 }
 
 @Composable
-private fun Adjuster(label: String, onMinus: () -> Unit, onPlus: () -> Unit) {
+private fun Adjuster(
+    label: String,
+    value: Int? = null,
+    tint: Color? = null,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f))
+        tint?.let {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(it))
+            Box(Modifier.size(8.dp))
+        }
+        Text(label, Modifier.weight(1f), maxLines = 1)
+        value?.let {
+            Text(it.toString(), Modifier.padding(end = 10.dp), fontWeight = FontWeight.Bold)
+        }
         StepperButton("−", onMinus)
         Box(Modifier.size(8.dp))
         StepperButton("+", onPlus)
+    }
+}
+
+/** A heading with a rule under it, so the dialog reads as sections rather than a list. */
+@Composable
+private fun DialogSection(title: String) {
+    Column(Modifier.padding(top = 4.dp)) {
+        Text(
+            title,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Box(
+            Modifier.fillMaxWidth().padding(top = 4.dp).height(1.dp)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+        )
+    }
+}
+
+/**
+ * A counter as one compact control rather than a full-width row.
+ *
+ * Four counters as four rows of label-plus-two-buttons turned the dialog into a wall of
+ * identical rows; as pills they take two rows between them and read as a set.
+ */
+@Composable
+private fun CounterStepper(label: String, value: Int, onMinus: () -> Unit, onPlus: () -> Unit) {
+    val shape = RoundedCornerShape(20.dp)
+    Row(
+        Modifier.clip(shape).border(1.dp, MaterialTheme.colorScheme.outline, shape),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StepGlyph(
+            "−", MaterialTheme.colorScheme.primary, 18.sp,
+            Modifier.clip(CircleShape).clickable(onClick = onMinus).padding(10.dp),
+        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            Text(
+                value.toString(),
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        StepGlyph(
+            "+", MaterialTheme.colorScheme.primary, 18.sp,
+            Modifier.clip(CircleShape).clickable(onClick = onPlus).padding(10.dp),
+        )
     }
 }
 
