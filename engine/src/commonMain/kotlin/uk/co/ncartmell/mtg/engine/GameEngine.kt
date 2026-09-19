@@ -244,9 +244,27 @@ object GameEngine {
         return null
     }
 
-    /** A game ends when one player is left, or when nobody is. */
+    /**
+     * A game ends when one player is left, or when nobody is.
+     *
+     * Star ends earlier: a player wins the moment both of the seats opposite them are
+     * out, with two other players still very much in the game. Being last standing still
+     * wins as well, which is what happens if the opposing pair never both fall.
+     */
     private fun resolveOutcome(state: GameState): GameState {
         val alive = state.livePlayers
+        if (state.settings.starFormat) {
+            val byStar = alive.filter { player ->
+                state.starOpponents(player.seat).all { state.player(it).isOut }
+            }
+            when {
+                byStar.size == 1 ->
+                    return state.copy(outcome = GameOutcome.Winner(byStar.single().seat))
+                // Only reachable if a single change removes two players at once, since
+                // otherwise the first of them would already have ended the game.
+                byStar.size > 1 -> return state.copy(outcome = GameOutcome.Draw)
+            }
+        }
         return when {
             alive.size == 1 -> state.copy(outcome = GameOutcome.Winner(alive.single().seat))
             alive.isEmpty() -> state.copy(outcome = GameOutcome.Draw)

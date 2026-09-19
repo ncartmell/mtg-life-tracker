@@ -64,6 +64,107 @@ class GameEngineTest {
         assertEquals(0, state.startingSeat)
     }
 
+    // --- star ------------------------------------------------------------------------
+
+    private fun starGame() = GameEngine.newGame(
+        GameSettings(playerCount = 5, startingLife = 20, starFormat = true),
+        seats(5),
+    )
+
+    @Test
+    fun `star opponents are the two seats you are not sitting next to`() {
+        val state = starGame()
+        assertEquals(listOf(2, 3), state.starOpponents(0))
+        assertEquals(listOf(3, 4), state.starOpponents(1))
+        assertEquals(listOf(4, 0), state.starOpponents(2))
+        assertEquals(listOf(0, 1), state.starOpponents(3))
+        assertEquals(listOf(1, 2), state.starOpponents(4))
+    }
+
+    @Test
+    fun `being opposed is mutual`() {
+        val state = starGame()
+        for (seat in 0 until 5) {
+            for (other in state.starOpponents(seat)) {
+                assertTrue(seat in state.starOpponents(other), "$seat vs $other")
+            }
+        }
+    }
+
+    @Test
+    fun `star is won once both opposite seats are out, with three players left in`() {
+        var state = starGame()
+        state = GameEngine.eliminate(state, 2, LossReason.Conceded)
+        assertNull(state.outcome, "one opponent down is not a win")
+
+        state = GameEngine.eliminate(state, 3, LossReason.Conceded)
+
+        assertEquals(GameOutcome.Winner(0), state.outcome)
+        // Seats 1 and 4 are still alive — that is the whole point of the format.
+        assertFalse(state.player(1).isOut)
+        assertFalse(state.player(4).isOut)
+        assertEquals(3, state.livePlayers.size)
+    }
+
+    @Test
+    fun `two seats sitting next to each other are still someone's pair`() {
+        var state = starGame()
+        state = GameEngine.eliminate(state, 1, LossReason.Conceded)
+        state = GameEngine.eliminate(state, 2, LossReason.Conceded)
+        // Seats 1 and 2 sit next to each other, but they are jointly opposite seat 4.
+        assertEquals(GameOutcome.Winner(4), state.outcome)
+    }
+
+    @Test
+    fun `two eliminations that are nobody's pair win nothing`() {
+        var state = starGame()
+        state = GameEngine.eliminate(state, 1, LossReason.Conceded)
+        state = GameEngine.eliminate(state, 3, LossReason.Conceded)
+        // No seat is opposed to both 1 and 3, so the game simply continues.
+        assertNull(state.outcome)
+        assertEquals(3, state.livePlayers.size)
+    }
+
+    @Test
+    fun `a star game with nobody left is still a draw`() {
+        var state = starGame()
+        // Wiping out 2 and 3 hands it to 0, so restore the outcome by taking 0 out too.
+        for (seat in listOf(1, 4, 2, 3, 0)) {
+            state = GameEngine.eliminate(state, seat, LossReason.Conceded)
+        }
+        assertEquals(GameOutcome.Draw, state.outcome)
+    }
+
+    @Test
+    fun `restoring a player reopens a star game that had been won`() {
+        var state = starGame()
+        state = GameEngine.eliminate(state, 2, LossReason.Conceded)
+        state = GameEngine.eliminate(state, 3, LossReason.Conceded)
+        assertEquals(GameOutcome.Winner(0), state.outcome)
+
+        state = GameEngine.restore(state, 3)
+
+        assertNull(state.outcome)
+    }
+
+    @Test
+    fun `star only applies to a five player game`() {
+        assertFailsWith<IllegalArgumentException> {
+            GameSettings(playerCount = 4, startingLife = 20, starFormat = true)
+        }
+    }
+
+    @Test
+    fun `a five player game without star still needs a last player standing`() {
+        var state = GameEngine.newGame(
+            GameSettings(playerCount = 5, startingLife = 20),
+            seats(5),
+        )
+        state = GameEngine.eliminate(state, 2, LossReason.Conceded)
+        state = GameEngine.eliminate(state, 3, LossReason.Conceded)
+        assertNull(state.outcome, "without star this is just a three-player game")
+    }
+
     // --- cannot lose -----------------------------------------------------------------
 
     @Test

@@ -93,6 +93,11 @@ data class GameSettings(
     val startingLife: Int,
     val commanderDamageEnabled: Boolean = true,
     val poisonEnabled: Boolean = true,
+    /**
+     * Star: five players sit in a ring and each has two opponents — the two they are not
+     * sitting next to. You win when both of yours are out, however many players are left.
+     */
+    val starFormat: Boolean = false,
     val poisonThreshold: Int = 10,
     val commanderDamageThreshold: Int = 21,
 ) {
@@ -103,11 +108,17 @@ data class GameSettings(
         require(startingLife > 0) { "Starting life must be positive, got $startingLife" }
         require(poisonThreshold > 0) { "Poison threshold must be positive" }
         require(commanderDamageThreshold > 0) { "Commander damage threshold must be positive" }
+        require(!starFormat || playerCount == STAR_PLAYERS) {
+            "Star is a $STAR_PLAYERS-player format, got $playerCount"
+        }
     }
 
     companion object {
         const val MIN_PLAYERS = 2
         const val MAX_PLAYERS = 6
+
+        /** Star is played by exactly five. */
+        const val STAR_PLAYERS = 5
 
         /** Starting life totals offered in setup; any value is accepted. */
         val COMMON_LIFE_TOTALS = listOf(20, 25, 30, 40)
@@ -175,6 +186,16 @@ data class GameState(
     fun player(seat: Int): PlayerState =
         players.firstOrNull { it.seat == seat }
             ?: error("No player in seat $seat")
+
+    /**
+     * The two seats opposite this one, in Star. Empty in every other format.
+     *
+     * Seats run round the table in order, so a seat is adjacent to the seats either side
+     * of it and opposed to the other two.
+     */
+    fun starOpponents(seat: Int): List<Int> =
+        if (!settings.starFormat) emptyList()
+        else listOf((seat + 2) % players.size, (seat + 3) % players.size)
 
     /** Every commander at the table other than this seat's own. */
     fun opposingCommanders(seat: Int): List<CommanderId> =

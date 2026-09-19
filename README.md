@@ -57,6 +57,11 @@ membership and TestFlight, so building it from Xcode is the only route.
   commander damage in a player's detail view
 - Players drop out automatically on zero life, ten poison, or twenty-one damage from any
   single commander
+- Star, for five players: everyone sits in seat order and your opponents are the two you
+  are not sitting next to. You win the moment both are out, with three players still in
+  — each panel shows which two seats it is waiting on, and how many are down
+- A player who is out has their colour drained away and is marked plainly, so the board
+  reads at a glance; the winner is ringed and labelled on the board, not only in a dialog
 - A player can be marked as unable to lose, for Platinum Angel and the like. Counters are
   not frozen underneath it — life still falls past zero — and everything that built up is
   applied the moment the flag is cleared, which is what happens when the permanent

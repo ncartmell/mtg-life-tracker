@@ -61,10 +61,14 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # :composeApp is only included when an Android SDK is present. The desktop
-      # packaging tasks live in that module, so the SDK has to be there even though
-      # nothing here builds for Android.
+      # :composeApp is only included when an Android SDK is present, and the desktop
+      # packaging tasks live in that module, so the SDK has to exist even though nothing
+      # here builds for Android. packages is emptied deliberately: the action's default
+      # installs the obsolete "tools" package, which no longer exists in the SDK
+      # repositories and fails the whole step. Gradle fetches what it actually needs.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - name: Package
         run: ./gradlew ${{ matrix.task }} --no-daemon

@@ -45,6 +45,10 @@ fun SetupScreen(state: AppState) {
     var startingLife by remember { mutableStateOf(40) }
     var commanderDamage by remember { mutableStateOf(true) }
     var poison by remember { mutableStateOf(true) }
+    var star by remember { mutableStateOf(false) }
+    // Star is a five-player format, so the toggle cannot outlive a change of player count.
+    val starAvailable = playerCount == GameSettings.STAR_PLAYERS
+    if (!starAvailable && star) star = false
 
     // Seat assignments, indexed by seat. Null profile means a guest.
     val seatProfiles = remember { mutableStateListOfNulls(GameSettings.MAX_PLAYERS) }
@@ -91,6 +95,16 @@ fun SetupScreen(state: AppState) {
             Section("Rules") {
                 ToggleRow("Commander damage", commanderDamage) { commanderDamage = it }
                 ToggleRow("Poison counters", poison) { poison = it }
+                if (starAvailable) {
+                    ToggleRow("Star format", star) { star = it }
+                    Text(
+                        "Everyone sits in seat order. Your opponents are the two players " +
+                            "you are not sitting next to, and you win when both are out — " +
+                            "even with three players still in.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -119,6 +133,7 @@ fun SetupScreen(state: AppState) {
                         startingLife = startingLife,
                         commanderDamageEnabled = commanderDamage,
                         poisonEnabled = poison,
+                        starFormat = star && starAvailable,
                     )
                     val seats = (0 until playerCount).map { seat ->
                         val profile = seatProfiles[seat]?.let { state.book[it] }

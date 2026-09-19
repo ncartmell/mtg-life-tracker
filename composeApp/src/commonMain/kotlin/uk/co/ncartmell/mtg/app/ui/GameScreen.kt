@@ -2,9 +2,12 @@ package uk.co.ncartmell.mtg.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -38,8 +41,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
@@ -47,6 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -65,6 +72,9 @@ fun GameScreen(state: AppState) {
     val game = state.game ?: return
     var detailSeat by remember { mutableStateOf<Int?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    // Keyed on the outcome so a new result always shows, but a dismissed one stays
+    // dismissed — the winner is marked on the board, and that is worth being able to see.
+    var resultDismissed by remember(game.outcome) { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().padding(8.dp)) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -107,11 +117,13 @@ fun GameScreen(state: AppState) {
         state.restart()
     }
 
-    (game.outcome as? GameOutcome.Winner)?.let {
-        GameOverDialog(state, game, it.seat, restartAndClose)
-    }
-    if (game.outcome is GameOutcome.Draw) {
-        GameOverDialog(state, game, winningSeat = null, onRestart = restartAndClose)
+    if (!resultDismissed) {
+        (game.outcome as? GameOutcome.Winner)?.let {
+            GameOverDialog(state, game, it.seat, restartAndClose) { resultDismissed = true }
+        }
+        if (game.outcome is GameOutcome.Draw) {
+            GameOverDialog(state, game, null, restartAndClose) { resultDismissed = true }
+        }
     }
 }
 
@@ -185,12 +197,16 @@ private fun PlayerPanel(
     val background = player.colour.composeColor()
     val ink = background.readableOn()
     val goesFirst = game.startingSeat == player.seat
+    val hasWon = (game.outcome as? GameOutcome.Winner)?.seat == player.seat
     val shape = RoundedCornerShape(12.dp)
+    // A player who is out keeps their colour, but drained of it, so the board reads at a
+    // glance: whoever still has a colour is still in.
+    val cardColour = if (player.isOut) player.colour.composeColor().drained() else background
 
     Card(
         modifier = modifier,
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = background),
+        colors = CardDefaults.cardColors(containerColor = cardColour),
     ) {
         BoxWithConstraints(
             // Whoever won the roll gets a ring rather than a label: at six players a panel
@@ -204,11 +220,15 @@ private fun PlayerPanel(
             Modifier.fillMaxSize()
                 .padding(RING_INSET)
                 .then(
-                    if (goesFirst) Modifier.border(RING_WIDTH, ink, RING_SHAPE)
-                    else Modifier,
+                    when {
+                        // The winner's ring is heavier than the first-player one, and
+                        // outlives it: the roll stops mattering once someone has won.
+                        hasWon -> Modifier.border(WIN_RING_WIDTH, ink, RING_SHAPE)
+                        goesFirst -> Modifier.border(RING_WIDTH, ink, RING_SHAPE)
+                        else -> Modifier
+                    },
                 )
-                .facing(facing)
-                .alpha(if (player.isOut) 0.45f else 1f),
+                .facing(facing),
         ) {
             // Six players on a phone leaves each panel about a third of the screen, so the
             // life row shrinks to fit rather than running off the edge of the card.
@@ -248,12 +268,46 @@ private fun PlayerPanel(
 
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (player.isOut) {
-                        Text(
-                            player.lostTo.describe(game),
-                            color = ink,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium,
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            OutMark(ink, if (tight) 34.dp else 46.dp)
+                            Text(
+                                "OUT",
+                                color = ink,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.18.em,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                player.lostTo.describe(game),
+                                color = ink,
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    } else if (hasWon) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                "WINNER",
+                                color = ink,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.2.em,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                player.life.toString(),
+                                color = ink,
+                                fontSize = lifeSize,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     } else {
                         Row(
                             Modifier.fillMaxWidth(),
@@ -289,16 +343,12 @@ private fun PlayerPanel(
                         color = ink,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
+                        softWrap = false,
                         style = if (tight) MaterialTheme.typography.labelMedium
                         else MaterialTheme.typography.titleSmall,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    TextButton(
-                        onClick = onOpenDetail,
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) {
-                        Text("More", color = ink, style = MaterialTheme.typography.labelMedium)
-                    }
+                    MoreButton(ink, tight, onOpenDetail)
                 }
 
                 FlowRow(
@@ -306,6 +356,23 @@ private fun PlayerPanel(
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    // In Star, which two seats you have to outlast is the whole game, so
+                    // it belongs on the panel rather than behind More.
+                    game.starOpponents(player.seat)
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { opponents ->
+                            val beaten = opponents.count { game.player(it).isOut }
+                            Text(
+                                "vs " + opponents.joinToString("\u00b7") { "P${it + 1}" } +
+                                    "  $beaten/2",
+                                color = ink,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (beaten > 0) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+
                     if (player.cannotLose) {
                         Text(
                             "Can't lose",
@@ -386,6 +453,7 @@ private fun Modifier.facing(facing: Facing): Modifier = when (facing) {
 /** The winner's ring, kept clear of the card's edge so it never meets the board behind. */
 private val RING_INSET = 3.dp
 private val RING_WIDTH = 3.dp
+private val WIN_RING_WIDTH = 6.dp
 private val RING_SHAPE = RoundedCornerShape(9.dp)
 
 private const val HOLD_BEFORE_REPEAT_MS = 400L
@@ -424,6 +492,77 @@ private fun Modifier.repeatingPress(onStep: () -> Unit): Modifier {
         )
     }
 }
+
+/**
+ * "More" spelled out where there is room, and three dots where there is not.
+ *
+ * At five and six players a panel is a third of the screen wide, and the word competes
+ * with the player's name for that width — which is how "Player 3" became "Player".
+ */
+@Composable
+private fun MoreButton(ink: Color, tight: Boolean, onClick: () -> Unit) {
+    // A plain box, not a TextButton: the button's 58dp minimum width is wider than the
+    // dots and was taking the room the name needed, which is what truncated it.
+    Box(
+        Modifier.clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (tight) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.5.dp)) {
+                repeat(3) { Box(Modifier.size(3.5.dp).clip(CircleShape).background(ink)) }
+            }
+        } else {
+            Text("More", color = ink, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/**
+ * A crossed-out circle, drawn rather than iconed so it needs no icon dependency and no
+ * font that happens to carry a skull.
+ */
+@Composable
+private fun OutMark(ink: Color, size: androidx.compose.ui.unit.Dp) {
+    Canvas(Modifier.size(size)) {
+        val stroke = this.size.minDimension * 0.09f
+        val inset = stroke / 2f
+        drawCircle(
+            color = ink,
+            radius = this.size.minDimension / 2f - inset,
+            style = Stroke(width = stroke),
+        )
+        val pad = this.size.minDimension * 0.3f
+        drawLine(
+            color = ink,
+            start = Offset(pad, pad),
+            end = Offset(this.size.width - pad, this.size.height - pad),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = ink,
+            start = Offset(this.size.width - pad, pad),
+            end = Offset(pad, this.size.height - pad),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+/**
+ * A colour drained toward the board behind it — keeps the hue, loses the life.
+ *
+ * Alpha would have done this too, but alpha dimmed the winner's ring and the "OUT" mark
+ * along with everything else, which is exactly what has to stay legible.
+ */
+private fun Color.drained(): Color = Color(
+    red = red * 0.32f + 0.078f,
+    green = green * 0.32f + 0.086f,
+    blue = blue * 0.32f + 0.102f,
+    alpha = 1f,
+)
 
 /** Only a label — the press is handled by the full-height column behind it. */
 @Composable
@@ -498,7 +637,12 @@ private fun PlayerDetailDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
         title = { Text(player.name) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Five opponents' commander damage plus the Star pairing overran the screen
+            // and took the removal buttons with it, so this scrolls.
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 if (game.settings.poisonEnabled) {
                     Adjuster(
                         label = "Poison (${player.poison}/${game.settings.poisonThreshold})",
@@ -533,6 +677,19 @@ private fun PlayerDetailDialog(
                         }
                     }
                 }
+
+                game.starOpponents(player.seat)
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { opponents ->
+                        Text("Opponents in Star", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            opponents.joinToString(" and ") { seat ->
+                                game.player(seat).name +
+                                    if (game.player(seat).isOut) " (out)" else ""
+                            } + " — win when both are out.",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
 
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -617,9 +774,10 @@ private fun GameOverDialog(
     game: GameState,
     winningSeat: Int?,
     onRestart: () -> Unit,
+    onSeeBoard: () -> Unit,
 ) {
     AlertDialog(
-        onDismissRequest = {},
+        onDismissRequest = onSeeBoard,
         title = { Text(if (winningSeat == null) "A draw" else "${game.player(winningSeat).name} wins") },
         text = {
             Column {
@@ -632,7 +790,12 @@ private fun GameOverDialog(
             }
         },
         confirmButton = { Button(onClick = onRestart) { Text("Play again") } },
-        dismissButton = { TextButton(onClick = state::leaveGame) { Text("Back to setup") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onSeeBoard) { Text("See board") }
+                TextButton(onClick = state::leaveGame) { Text("Setup") }
+            }
+        },
     )
 }
 
