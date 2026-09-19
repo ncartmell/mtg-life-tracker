@@ -136,6 +136,66 @@ class GameEngineTest {
         assertEquals(turnsBefore, state.turnCount, "an interrupted turn is not a taken one")
     }
 
+    // The test above goes through adjustLife, and only that route was ever covered. Being
+    // knocked out by hand took a different path out of the engine and skipped the whole
+    // tail, so the turn — and the monarchy with it — stayed with a player who was out.
+
+    @Test
+    fun `the turn moves on if whoever held it is knocked out by hand`() {
+        var state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(20, 5, 7, 11)),
+        )
+        assertEquals(0, state.turnSeat)
+        val turnsBefore = state.turnCount
+
+        state = GameEngine.eliminate(state, 0, LossReason.Conceded)
+
+        assertEquals(1, state.turnSeat)
+        assertEquals(turnsBefore, state.turnCount, "an interrupted turn is not a taken one")
+    }
+
+    @Test
+    fun `knocking out the turn holder by hand skips anyone already out`() {
+        var state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(20, 5, 7, 11)),
+        )
+        state = GameEngine.eliminate(state, 1, LossReason.Conceded)
+        state = GameEngine.eliminate(state, 0, LossReason.Conceded)
+        assertEquals(2, state.turnSeat, "seat 1 was already out, so the turn passes over it")
+    }
+
+    @Test
+    fun `a player knocked out by hand drops the monarchy and the initiative`() {
+        var state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(20, 5, 7, 11)),
+        )
+        state = GameEngine.setMonarch(state, 2)
+        state = GameEngine.setInitiative(state, 2)
+
+        state = GameEngine.eliminate(state, 2, LossReason.Conceded)
+
+        assertNull(state.monarchSeat)
+        assertNull(state.initiativeSeat)
+    }
+
+    @Test
+    fun `the last player knocked out ends the game rather than passing the turn on`() {
+        var state = GameEngine.rollForFirstPlayer(
+            game(players = 2),
+            random = ScriptedRandom(listOf(20, 5)),
+        )
+        assertEquals(0, state.turnSeat)
+
+        state = GameEngine.eliminate(state, 1, LossReason.Conceded)
+
+        assertTrue(state.isFinished)
+        assertEquals(listOf(0), state.outcome?.winningSeats)
+        assertEquals(0, state.turnSeat, "the winner keeps the turn they were on")
+    }
+
     @Test
     fun `dice come back in range`() {
         val thrown = GameEngine.rollDice(sides = 6, count = 4, random = Random(1))

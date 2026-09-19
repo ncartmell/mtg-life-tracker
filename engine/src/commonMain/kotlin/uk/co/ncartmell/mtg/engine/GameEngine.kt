@@ -198,14 +198,21 @@ object GameEngine {
         return applyEliminations(next)
     }
 
-    /** Removes a player for a reason the engine cannot detect itself. */
+    /**
+     * Removes a player for a reason the engine cannot detect itself.
+     *
+     * Goes through the same tail as a death the engine does detect. Calling
+     * [resolveOutcome] straight left a player removed by hand holding the turn, and the
+     * monarchy with them, while a player who died to a counter dropped both — the same
+     * event with two different outcomes depending on which route removed them.
+     */
     fun eliminate(state: GameState, seat: Int, reason: LossReason): GameState {
         val next = state.copy(
             players = state.players.map {
                 if (it.seat == seat && !it.isOut) it.copy(lostTo = reason) else it
             },
         )
-        return resolveOutcome(next)
+        return applyEliminations(next)
     }
 
     /**
