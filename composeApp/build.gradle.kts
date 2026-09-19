@@ -49,6 +49,7 @@ kotlin {
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
+            implementation(libs.androidx.splashscreen)
         }
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)

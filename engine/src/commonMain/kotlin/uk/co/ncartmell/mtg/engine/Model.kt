@@ -177,6 +177,10 @@ data class GameState(
     /** Seat chosen to take the first turn, once decided. */
     val startingSeat: Int? = null,
     val lastRoll: DiceRoll? = null,
+    /** Whose turn it is, once somebody has started. */
+    val turnSeat: Int? = null,
+    /** How many turns have been taken in total, counting the first. */
+    val turnCount: Int = 0,
     val outcome: GameOutcome? = null,
 ) {
     val isFinished: Boolean get() = outcome != null
@@ -203,11 +207,39 @@ data class GameState(
             .flatMap { other -> (0 until other.commanderCount).map { CommanderId(other.seat, it) } }
 }
 
-/** The roll used to decide who goes first. Kept so the UI can show it if it wants to. */
+/**
+ * The roll used to decide who goes first, kept in full.
+ *
+ * Every round is retained, not just the one that settled it. Keeping only the last round
+ * meant that after a tie-break the players who were not in it had no number at all, which
+ * looked like the app had simply forgotten them.
+ */
 @Serializable
 data class DiceRoll(
-    val results: Map<Int, Int>,
+    val rounds: List<Map<Int, Int>>,
     val winningSeat: Int,
 ) {
-    val highest: Int get() = results.values.maxOrNull() ?: 0
+    init {
+        require(rounds.isNotEmpty()) { "A roll has at least one round" }
+    }
+
+    /** What everybody rolled to begin with — the number that belongs on a panel. */
+    val openingRoll: Map<Int, Int> get() = rounds.first()
+
+    /** Rounds rolled to break a tie, if it came to that. */
+    val tieBreaks: List<Map<Int, Int>> get() = rounds.drop(1)
+
+    val wasTied: Boolean get() = rounds.size > 1
+
+    /** The number that actually won, which is from the last round when there was a tie. */
+    val winningRoll: Int get() = rounds.last()[winningSeat] ?: 0
+}
+
+/** A roll of dice made for its own sake, rather than to decide who starts. */
+@Serializable
+data class DiceThrow(val sides: Int, val values: List<Int>) {
+    val total: Int get() = values.sum()
+
+    /** A single coin is modelled as a two-sided die, so heads is 2 and tails is 1. */
+    val isCoin: Boolean get() = sides == 2
 }

@@ -41,8 +41,9 @@ class GameEngineTest {
         )
 
         assertEquals(0, state.startingSeat)
-        assertEquals(20, state.lastRoll?.results?.get(0))
+        assertEquals(20, state.lastRoll?.openingRoll?.get(0))
         assertEquals(0, state.lastRoll?.winningSeat)
+        assertEquals(false, state.lastRoll?.wasTied)
     }
 
     @Test
@@ -51,7 +52,7 @@ class GameEngineTest {
             game(players = 4),
             random = ScriptedRandom(listOf(20, 3, 7, 11)),
         )
-        assertEquals(setOf(0, 1, 2, 3), state.lastRoll?.results?.keys)
+        assertEquals(setOf(0, 1, 2, 3), state.lastRoll?.openingRoll?.keys)
     }
 
     @Test
@@ -62,6 +63,99 @@ class GameEngineTest {
             random = ScriptedRandom(listOf(18, 4, 18, 9, 15, 2)),
         )
         assertEquals(0, state.startingSeat)
+    }
+
+    // --- rolls, turns and dice --------------------------------------------------------
+
+    @Test
+    fun `a tie-break keeps everybody's opening roll`() {
+        // Seats 0 and 2 tie on 18; only they re-roll.
+        val state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(18, 4, 18, 9, 15, 2)),
+        )
+        val roll = state.lastRoll!!
+
+        // This is the bug that made two of four players show no number at all.
+        assertEquals(setOf(0, 1, 2, 3), roll.openingRoll.keys)
+        assertEquals(mapOf(0 to 18, 1 to 4, 2 to 18, 3 to 9), roll.openingRoll)
+        assertTrue(roll.wasTied)
+        assertEquals(listOf(mapOf(0 to 15, 2 to 2)), roll.tieBreaks)
+        assertEquals(0, roll.winningSeat)
+        assertEquals(15, roll.winningRoll, "the winning number is the one that settled it")
+    }
+
+    @Test
+    fun `rolling for first player also starts the turn on them`() {
+        val state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(3, 20, 7, 11)),
+        )
+        assertEquals(1, state.turnSeat)
+        assertEquals(1, state.turnCount)
+    }
+
+    @Test
+    fun `turns pass round the table in seat order and wrap`() {
+        var state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(3, 5, 20, 11)),
+        )
+        assertEquals(2, state.turnSeat)
+
+        state = GameEngine.nextTurn(state)
+        assertEquals(3, state.turnSeat)
+        state = GameEngine.nextTurn(state)
+        assertEquals(0, state.turnSeat, "wraps back round")
+        assertEquals(3, state.turnCount)
+    }
+
+    @Test
+    fun `turns skip a player who is out`() {
+        var state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(20, 5, 7, 11)),
+        )
+        state = GameEngine.eliminate(state, 1, LossReason.Conceded)
+        state = GameEngine.nextTurn(state)
+        assertEquals(2, state.turnSeat, "seat 1 is out, so it is seat 2's turn")
+    }
+
+    @Test
+    fun `the turn moves on if whoever held it is eliminated`() {
+        var state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(20, 5, 7, 11)),
+        )
+        assertEquals(0, state.turnSeat)
+        val turnsBefore = state.turnCount
+
+        state = GameEngine.adjustLife(state, 0, -40)
+
+        assertEquals(1, state.turnSeat)
+        assertEquals(turnsBefore, state.turnCount, "an interrupted turn is not a taken one")
+    }
+
+    @Test
+    fun `dice come back in range`() {
+        val thrown = GameEngine.rollDice(sides = 6, count = 4, random = Random(1))
+        assertEquals(4, thrown.values.size)
+        assertTrue(thrown.values.all { it in 1..6 }, thrown.values.toString())
+        assertEquals(thrown.values.sum(), thrown.total)
+    }
+
+    @Test
+    fun `a coin is a two sided die`() {
+        val flip = GameEngine.rollDice(sides = 2, random = Random(7))
+        assertTrue(flip.isCoin)
+        assertTrue(flip.values.single() in 1..2)
+    }
+
+    @Test
+    fun `dice are bounded`() {
+        assertFailsWith<IllegalArgumentException> { GameEngine.rollDice(sides = 1) }
+        assertFailsWith<IllegalArgumentException> { GameEngine.rollDice(sides = 6, count = 0) }
+        assertFailsWith<IllegalArgumentException> { GameEngine.rollDice(sides = 6, count = 21) }
     }
 
     // --- star ------------------------------------------------------------------------
@@ -620,7 +714,7 @@ class GameEngineTest {
         val seat = state.startingSeat
         assertTrue(seat != null && seat in 0..3)
         assertEquals(seat, state.lastRoll?.winningSeat)
-        assertEquals(4, state.lastRoll?.results?.size)
+        assertEquals(4, state.lastRoll?.openingRoll?.size)
     }
 
     @Test
@@ -630,7 +724,7 @@ class GameEngineTest {
         state = GameEngine.eliminate(state, 1, LossReason.Conceded)
         state = GameEngine.rollForFirstPlayer(state, Random(7))
         assertTrue(state.startingSeat in listOf(2, 3))
-        assertEquals(setOf(2, 3), state.lastRoll?.results?.keys)
+        assertEquals(setOf(2, 3), state.lastRoll?.openingRoll?.keys)
     }
 
     @Test
@@ -641,8 +735,10 @@ class GameEngineTest {
             val state = GameEngine.rollForFirstPlayer(game(players = 4), Random(seed), sides = 2)
             val winner = state.startingSeat
             assertTrue(winner != null, "a winner is always produced")
-            val results = state.lastRoll!!.results
-            assertEquals(1, results.values.count { it == results.values.max() })
+            // The round that settled it has exactly one top roll, however many rounds
+            // it took to get there.
+            val deciding = state.lastRoll!!.rounds.last()
+            assertEquals(1, deciding.values.count { it == deciding.values.max() })
         }
     }
 

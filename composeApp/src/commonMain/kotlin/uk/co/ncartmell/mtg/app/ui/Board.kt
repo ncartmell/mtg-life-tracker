@@ -34,7 +34,22 @@ data class BoardRow(val seats: List<BoardSeat>)
  * panel in a 2x2 grid is roughly twice as tall as it is wide, so that is roughly twice
  * the room for a life total.
  */
-fun boardLayout(playerCount: Int): List<BoardRow> = when (playerCount) {
+fun boardLayout(playerCount: Int, star: Boolean = false): List<BoardRow> {
+    // Star only makes sense if you can see who is next to whom, so its five seats are
+    // laid out as the points of a star rather than as two rows: one at the top, two down
+    // each side. Read clockwise from the top and seat order is the seating order, which
+    // is what the opposing pairs are defined in terms of.
+    if (star && playerCount == 5) {
+        return listOf(
+            BoardRow(listOf(BoardSeat(0, Facing.TOP))),
+            BoardRow(listOf(BoardSeat(4, Facing.LEFT), BoardSeat(1, Facing.RIGHT))),
+            BoardRow(listOf(BoardSeat(3, Facing.BOTTOM), BoardSeat(2, Facing.BOTTOM))),
+        )
+    }
+    return standardLayout(playerCount)
+}
+
+private fun standardLayout(playerCount: Int): List<BoardRow> = when (playerCount) {
     2 -> listOf(
         BoardRow(listOf(BoardSeat(0, Facing.TOP))),
         BoardRow(listOf(BoardSeat(1, Facing.BOTTOM))),

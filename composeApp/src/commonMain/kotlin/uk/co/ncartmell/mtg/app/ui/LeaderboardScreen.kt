@@ -24,11 +24,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.Screen
+import uk.co.ncartmell.mtg.engine.GameRecord
 import kotlin.math.roundToInt
 
 @Composable
 fun LeaderboardScreen(state: AppState) {
     val standings = state.book.leaderboard()
+    val recent = state.games.games
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(
@@ -42,10 +44,11 @@ fun LeaderboardScreen(state: AppState) {
             ) { Text("Back") }
         }
 
-        if (standings.isEmpty()) {
+        if (standings.isEmpty() && recent.isEmpty()) {
             Text(
                 "No games recorded yet. Add profiles on the setup screen and play a game — " +
-                    "results are only recorded for seats with a profile.",
+                    "the table is only kept for seats with a profile, though every finished " +
+                    "game is listed below it.",
                 Modifier.padding(top = 24.dp),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -83,6 +86,65 @@ fun LeaderboardScreen(state: AppState) {
                     }
                 }
             }
+
+            if (recent.isNotEmpty()) {
+                item {
+                    Text(
+                        "Recent games",
+                        Modifier.padding(top = 20.dp, bottom = 4.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                items(recent) { record -> GameRow(record) }
+            }
+        }
+    }
+}
+
+/**
+ * One finished game.
+ *
+ * The totals above are a summary of these, so this is the part that can answer "who
+ * actually beat whom", which running win counts on their own never can.
+ */
+@Composable
+private fun GameRow(record: GameRecord) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val winner = record.winner
+                if (winner != null) {
+                    Box(
+                        Modifier.size(14.dp).clip(CircleShape)
+                            .background(winner.colour.composeColor()),
+                    )
+                    Text(
+                        "${winner.name} won",
+                        Modifier.padding(start = 10.dp).weight(1f),
+                        fontWeight = FontWeight.Medium,
+                    )
+                } else {
+                    Text("Draw", Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                }
+                Text(
+                    buildString {
+                        append("${record.seats.size}p")
+                        append("  ·  ${record.settings.startingLife}")
+                        if (record.settings.starFormat) append("  ·  Star")
+                        if (record.turns > 0) append("  ·  ${record.turns} turns")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                record.seats
+                    .filter { it.seat != record.winningSeat }
+                    .joinToString(", ") { it.name },
+                Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

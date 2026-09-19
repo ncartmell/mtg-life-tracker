@@ -187,19 +187,45 @@ object GameEngine {
         var contenders = state.livePlayers.map { it.seat }
         if (contenders.isEmpty()) return state
 
-        var results: Map<Int, Int>
+        val rounds = mutableListOf<Map<Int, Int>>()
         while (true) {
-            results = contenders.associateWith { random.nextInt(1, sides + 1) }
-            val best = results.values.max()
-            val winners = results.filterValues { it == best }.keys
+            val round = contenders.associateWith { random.nextInt(1, sides + 1) }
+            rounds += round
+            val best = round.values.max()
+            val winners = round.filterValues { it == best }.keys
             if (winners.size == 1) {
+                val winner = winners.first()
                 return state.copy(
-                    startingSeat = winners.first(),
-                    lastRoll = DiceRoll(results, winners.first()),
+                    startingSeat = winner,
+                    lastRoll = DiceRoll(rounds.toList(), winner),
+                    turnSeat = winner,
+                    turnCount = 1,
                 )
             }
             contenders = winners.toList()
         }
+    }
+
+    /** Rolls dice for their own sake — a coin is two sides. */
+    fun rollDice(sides: Int, count: Int = 1, random: Random = Random): DiceThrow {
+        require(sides > 1) { "A die needs more than one side" }
+        require(count in 1..20) { "Roll between one and twenty dice, got $count" }
+        return DiceThrow(sides, List(count) { random.nextInt(1, sides + 1) })
+    }
+
+    /**
+     * Passes the turn to the next seat still in the game.
+     *
+     * Seating order is seat order, and players who are out are skipped rather than given
+     * a turn they cannot take.
+     */
+    fun nextTurn(state: GameState): GameState {
+        val live = state.livePlayers.map { it.seat }.sorted()
+        if (live.isEmpty() || state.isFinished) return state
+        val current = state.turnSeat
+            ?: return state.copy(turnSeat = live.first(), turnCount = state.turnCount + 1)
+        val next = live.firstOrNull { it > current } ?: live.first()
+        return state.copy(turnSeat = next, turnCount = state.turnCount + 1)
     }
 
     // --- internals -------------------------------------------------------------------
@@ -225,7 +251,17 @@ object GameEngine {
             val reason = detectLoss(player, state.settings)
             if (reason != null) player.copy(lostTo = reason) else player
         }
-        return resolveOutcome(state.copy(players = players))
+        return resolveOutcome(state.copy(players = players)).passTurnIfHolderIsOut()
+    }
+
+    /** Keeps the turn with somebody who can actually take it. */
+    private fun GameState.passTurnIfHolderIsOut(): GameState {
+        val holder = turnSeat ?: return this
+        if (!player(holder).isOut || isFinished) return this
+        val live = livePlayers.map { it.seat }.sorted()
+        if (live.isEmpty()) return copy(turnSeat = null)
+        // Does not count as a new turn: the turn was interrupted, not taken.
+        return copy(turnSeat = live.firstOrNull { it > holder } ?: live.first())
     }
 
     private fun detectLoss(player: PlayerState, settings: GameSettings): LossReason? {

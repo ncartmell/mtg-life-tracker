@@ -3,8 +3,12 @@ package uk.co.ncartmell.mtg.app
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import uk.co.ncartmell.mtg.app.store.HistoryRepository
 import uk.co.ncartmell.mtg.app.store.ProfileRepository
 import uk.co.ncartmell.mtg.app.store.createStorage
+import uk.co.ncartmell.mtg.app.store.nowMillis
+import uk.co.ncartmell.mtg.engine.DiceThrow
+import uk.co.ncartmell.mtg.engine.GameHistory
 import uk.co.ncartmell.mtg.engine.CommanderId
 import uk.co.ncartmell.mtg.engine.GameEngine
 import uk.co.ncartmell.mtg.engine.GameSettings
@@ -25,12 +29,21 @@ enum class Screen { Setup, Game, Leaderboard }
  */
 class AppState(
     private val profiles: ProfileRepository = ProfileRepository(createStorage()),
+    private val history: HistoryRepository = HistoryRepository(createStorage()),
     private val random: Random = Random,
+    private val clock: () -> Long = ::nowMillis,
 ) {
     var screen by mutableStateOf(Screen.Setup)
         private set
 
     var book by mutableStateOf(profiles.load())
+        private set
+
+    var games by mutableStateOf(history.load())
+        private set
+
+    /** The last dice thrown for their own sake, so the board can show them. */
+    var lastThrow by mutableStateOf<DiceThrow?>(null)
         private set
 
     var game by mutableStateOf<GameState?>(null)
@@ -73,12 +86,27 @@ class AppState(
     fun startGame(settings: GameSettings, seats: List<SeatSetup>) {
         game = GameEngine.newGame(settings, seats)
         resultRecorded = false
+        lastThrow = null
         screen = Screen.Game
     }
 
-    fun restart() = updateGame { GameEngine.restart(it) }.also { resultRecorded = false }
+    fun restart() {
+        updateGame { GameEngine.restart(it) }
+        resultRecorded = false
+        lastThrow = null
+    }
 
     fun rollForFirstPlayer() = updateGame { GameEngine.rollForFirstPlayer(it, random) }
+
+    fun nextTurn() = updateGame { GameEngine.nextTurn(it) }
+
+    fun rollDice(sides: Int, count: Int = 1) {
+        lastThrow = GameEngine.rollDice(sides, count, random)
+    }
+
+    fun clearThrow() {
+        lastThrow = null
+    }
 
     fun adjustLife(seat: Int, delta: Int) = updateGame { GameEngine.adjustLife(it, seat, delta) }
 
@@ -111,6 +139,7 @@ class AppState(
         if (next.isFinished && !resultRecorded) {
             resultRecorded = true
             book = book.recordResult(next).also(profiles::save)
+            games = games.record(next, clock()).also(history::save)
         }
     }
 }

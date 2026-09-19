@@ -60,6 +60,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import uk.co.ncartmell.mtg.app.AppState
+import uk.co.ncartmell.mtg.app.KeepScreenAwake
 import uk.co.ncartmell.mtg.app.Screen
 import uk.co.ncartmell.mtg.engine.CommanderId
 import uk.co.ncartmell.mtg.engine.GameOutcome
@@ -70,15 +71,17 @@ import uk.co.ncartmell.mtg.engine.PlayerState
 @Composable
 fun GameScreen(state: AppState) {
     val game = state.game ?: return
+    KeepScreenAwake()
     var detailSeat by remember { mutableStateOf<Int?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     // Keyed on the outcome so a new result always shows, but a dismissed one stays
     // dismissed — the winner is marked on the board, and that is worth being able to see.
     var resultDismissed by remember(game.outcome) { mutableStateOf(false) }
+    var rollOpen by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().padding(8.dp)) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            boardLayout(game.settings.playerCount).forEach { row ->
+            boardLayout(game.settings.playerCount, game.settings.starFormat).forEach { row ->
                 Row(
                     Modifier.weight(1f).fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -102,7 +105,16 @@ fun GameScreen(state: AppState) {
         MenuButton(onClick = { menuOpen = true }, modifier = Modifier.align(Alignment.Center))
     }
 
-    if (menuOpen) BoardMenu(state, game, onDismiss = { menuOpen = false })
+    if (menuOpen) {
+        BoardMenu(
+            state = state,
+            game = game,
+            onDismiss = { menuOpen = false },
+            onOpenRoll = { menuOpen = false; rollOpen = true },
+        )
+    }
+
+    if (rollOpen) RollDialog(state, game) { rollOpen = false; state.clearThrow() }
 
     detailSeat?.let { seat ->
         PlayerDetailDialog(state, game, game.player(seat), onDismiss = { detailSeat = null })
@@ -147,25 +159,32 @@ private fun MenuButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun BoardMenu(state: AppState, game: GameState, onDismiss: () -> Unit) {
+private fun BoardMenu(
+    state: AppState,
+    game: GameState,
+    onDismiss: () -> Unit,
+    onOpenRoll: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Game") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                game.startingSeat?.let { seat ->
+                game.turnSeat?.let { seat ->
                     Text(
-                        "${game.player(seat).name} goes first" +
-                            (game.lastRoll?.let { " (rolled ${it.highest})" } ?: ""),
+                        "Turn ${game.turnCount} — ${game.player(seat).name}",
                         fontWeight = FontWeight.Medium,
                     )
+                    Button(
+                        onClick = { state.nextTurn(); onDismiss() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Pass the turn") }
                 }
-                // Closes on roll: every seat's number appears on its own panel, which is
-                // the point of rolling at a shared table.
+
                 OutlinedButton(
-                    onClick = { state.rollForFirstPlayer(); onDismiss() },
+                    onClick = onOpenRoll,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Who goes first?") }
+                ) { Text("Roll dice") }
                 OutlinedButton(
                     onClick = { state.restart(); onDismiss() },
                     modifier = Modifier.fillMaxWidth(),
@@ -373,6 +392,17 @@ private fun PlayerPanel(
                             )
                         }
 
+                    if (game.turnSeat == player.seat && !player.isOut) {
+                        Text(
+                            "TURN " + game.turnCount,
+                            color = ink,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+
                     if (player.cannotLose) {
                         Text(
                             "Can't lose",
@@ -384,7 +414,7 @@ private fun PlayerPanel(
                         )
                     }
 
-                    game.lastRoll?.results?.get(player.seat)?.let { rolled ->
+                    game.lastRoll?.openingRoll?.get(player.seat)?.let { rolled ->
                         Counter("Roll", rolled, null, ink)
                     }
 
@@ -413,6 +443,133 @@ private fun PlayerPanel(
                 }
             }
         }
+    }
+}
+
+/**
+ * Everything to do with rolling, in one place.
+ *
+ * The first-player roll used to be a single menu entry and a small number on each panel,
+ * which was easy to miss entirely. Here the whole table's roll is laid out in order, a
+ * tie-break is shown as the separate round it actually was, and the same dialog throws
+ * ordinary dice — which a game needs constantly and the app had no answer for.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Roll") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Who goes first", fontWeight = FontWeight.SemiBold)
+                Button(
+                    onClick = state::rollForFirstPlayer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (game.lastRoll == null) "Roll for first player" else "Roll again") }
+
+                game.lastRoll?.let { roll ->
+                    Text(
+                        "${game.player(roll.winningSeat).name} goes first, " +
+                            "with ${roll.winningRoll}",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    roll.openingRoll.entries
+                        .sortedByDescending { it.value }
+                        .forEach { (seat, value) ->
+                            RollRow(
+                                colour = game.player(seat).colour.composeColor(),
+                                name = game.player(seat).name,
+                                value = value,
+                                won = !roll.wasTied && seat == roll.winningSeat,
+                            )
+                        }
+                    roll.tieBreaks.forEachIndexed { index, round ->
+                        Text(
+                            "Tied on ${round.keys.mapNotNull { roll.openingRoll[it] }.maxOrNull()}" +
+                                " — re-roll ${index + 1}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        round.entries.sortedByDescending { it.value }.forEach { (seat, value) ->
+                            RollRow(
+                                colour = game.player(seat).colour.composeColor(),
+                                name = game.player(seat).name,
+                                value = value,
+                                won = index == roll.tieBreaks.lastIndex &&
+                                    seat == roll.winningSeat,
+                            )
+                        }
+                    }
+                }
+
+                Box(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        .size(width = 1.dp, height = 1.dp)
+                        .background(MaterialTheme.colorScheme.outline),
+                )
+
+                Text("Dice", fontWeight = FontWeight.SemiBold)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf(4, 6, 8, 10, 12, 20).forEach { sides ->
+                        OutlinedButton(onClick = { state.rollDice(sides) }) { Text("d$sides") }
+                    }
+                    OutlinedButton(onClick = { state.rollDice(2) }) { Text("Coin") }
+                }
+
+                state.lastThrow?.let { thrown ->
+                    Text(
+                        if (thrown.isCoin) {
+                            if (thrown.values.single() == 2) "Heads" else "Tails"
+                        } else {
+                            thrown.total.toString()
+                        },
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    if (!thrown.isCoin) {
+                        Text(
+                            "d${thrown.sides}" +
+                                if (thrown.values.size > 1) {
+                                    " — " + thrown.values.joinToString(" + ")
+                                } else "",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun RollRow(colour: Color, name: String, value: Int, won: Boolean) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(colour))
+        Text(
+            name,
+            Modifier.weight(1f),
+            fontWeight = if (won) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+        )
+        Text(
+            value.toString(),
+            fontWeight = if (won) FontWeight.Bold else FontWeight.Normal,
+        )
     }
 }
 
