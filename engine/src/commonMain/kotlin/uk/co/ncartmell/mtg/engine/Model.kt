@@ -294,11 +294,38 @@ data class GameState(
     /** Planechase: whatever plane is in play, named by whoever is running the game. */
     val currentPlane: String? = null,
     val planeswalks: Int = 0,
+    /**
+     * The seats in the order they sit round the table, clockwise.
+     *
+     * Turns pass in this order rather than in seat order, because the two are not the
+     * same: on a two-by-two board, seat two sits opposite seat one, not next to it.
+     * Empty falls back to seat order, which is right for a single row.
+     */
+    val seatingOrder: List<Int> = emptyList(),
     val outcome: GameOutcome? = null,
 ) {
     val isFinished: Boolean get() = outcome != null
 
     val livePlayers: List<PlayerState> get() = players.filterNot { it.isOut }
+
+    /** Seating, falling back to seat order when nobody has supplied any. */
+    val seating: List<Int>
+        get() = seatingOrder.takeIf { it.isNotEmpty() } ?: players.map { it.seat }.sorted()
+
+    /** The next seat round the table after [seat] that is still in the game. */
+    fun nextLiveSeatAfter(seat: Int?): Int? {
+        val live = seating.filter { !player(it).isOut }
+        if (live.isEmpty()) return null
+        val from = seat?.let { seating.indexOf(it) } ?: -1
+        if (from < 0) return live.first()
+        // Walk the ring from just after the current seat, so the first live seat found is
+        // the next one clockwise however many players in a row are out.
+        for (step in 1..seating.size) {
+            val candidate = seating[(from + step) % seating.size]
+            if (!player(candidate).isOut) return candidate
+        }
+        return live.first()
+    }
 
     fun player(seat: Int): PlayerState =
         players.firstOrNull { it.seat == seat }

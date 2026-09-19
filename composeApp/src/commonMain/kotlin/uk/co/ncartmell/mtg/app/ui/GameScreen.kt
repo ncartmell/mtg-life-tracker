@@ -1114,22 +1114,14 @@ private fun PlayerDetailDialog(
                     }
                 } else {
                     DialogSection("Remove from the game")
-                    // Wraps: three buttons do not fit across a dialog on a phone, and a
-                    // Row squeezes the last one until its label breaks mid-word.
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = { state.eliminate(player.seat, LossReason.Milled) },
-                        ) { Text("Milled") }
-                        OutlinedButton(
-                            onClick = { state.eliminate(player.seat, LossReason.Effect) },
-                        ) { Text("Killed") }
-                        OutlinedButton(
-                            onClick = { state.eliminate(player.seat, LossReason.Conceded) },
-                        ) { Text("Conceded") }
-                    }
+                    // One way out rather than three. The engine still records how a
+                    // player went when it worked it out itself — out of life, poisoned,
+                    // commander damage — but nobody mid-game wants to choose between
+                    // milled, killed and conceded to say "they are out".
+                    OutlinedButton(
+                        onClick = { state.eliminate(player.seat, LossReason.Effect) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Knock out") }
                 }
             }
         },
@@ -1280,7 +1272,7 @@ private fun LossReason?.describe(game: GameState): String = when (this) {
     LossReason.LifeDepleted -> "out of life"
     LossReason.Poison -> "poisoned"
     LossReason.Milled -> "milled"
-    LossReason.Effect -> "killed"
+    LossReason.Effect -> "knocked out"
     LossReason.Conceded -> "conceded"
     is LossReason.CommanderDamage -> commanderDamageLabel(this.from, game)
 }

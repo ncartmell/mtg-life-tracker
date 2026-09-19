@@ -65,8 +65,8 @@ android {
         applicationId = "uk.co.ncartmell.mtg.app"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 6
-        versionName = "1.5.0"
+        versionCode = 7
+        versionName = "1.6.0"
     }
 
     signingConfigs {
@@ -107,7 +107,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Exe, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "MTG Life Tracker"
-            packageVersion = "1.5.0"
+            packageVersion = "1.6.0"
         }
     }
 }

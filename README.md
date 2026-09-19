@@ -70,8 +70,10 @@ signature, which the sideloading tools above add using your own Apple ID.
   - **Archenemy** (3–6) — seat one against everybody else
   - **Emperor** (6) — two teams of three; a team falls the moment its emperor does,
     however healthy its generals are
-- Whose turn it is and how many turns have been taken, passed round in seat order and
-  skipping anyone who is out, with a game clock and a turn clock
+- Whose turn it is and how many turns have been taken, passed clockwise round the board
+  as it is actually drawn — on a two-by-two board that is top-left, top-right,
+  bottom-right, bottom-left, not seat order — skipping anyone who is out, with a game
+  clock and a turn clock
 - Energy, experience, storm and commander tax alongside poison, shown on a panel only
   once they are actually in play
 - The monarchy and the initiative, held by one player at a time and dropped by anyone who
@@ -91,7 +93,7 @@ signature, which the sideloading tools above add using your own Apple ID.
   not frozen underneath it — life still falls past zero — and everything that built up is
   applied the moment the flag is cleared, which is what happens when the permanent
   granting it dies
-- Mill, concede, and "something just killed me" as explicit outs
+- One button to knock a player out, for everything the app cannot see for itself
 - A player removed by mistake can be brought back; whatever was lethal is lifted just
   clear of its threshold, so someone restored from zero life returns on one
 - Roll to decide who goes first; every seat's number lands on its own panel and the

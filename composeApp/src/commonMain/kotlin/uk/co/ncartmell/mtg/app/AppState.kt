@@ -4,6 +4,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import uk.co.ncartmell.mtg.app.store.HistoryRepository
+import uk.co.ncartmell.mtg.app.ui.boardLayout
+import uk.co.ncartmell.mtg.app.ui.clockwiseOrder
 import uk.co.ncartmell.mtg.app.store.ProfileRepository
 import uk.co.ncartmell.mtg.app.store.SetupMemory
 import uk.co.ncartmell.mtg.app.store.SetupRepository
@@ -115,7 +117,14 @@ class AppState(
     // --- game ------------------------------------------------------------------------
 
     fun startGame(settings: GameSettings, seats: List<SeatSetup>) {
-        game = GameEngine.newGame(settings, seats, startedAt = clock())
+        game = GameEngine.newGame(
+            settings = settings,
+            seats = seats,
+            startedAt = clock(),
+            // Turns follow the board, not the seat numbers. The layout is the thing that
+            // decides who is sitting next to whom, so it is the thing asked.
+            seatingOrder = clockwiseOrder(boardLayout(settings.playerCount, settings.format)),
+        )
         resultRecorded = false
         lastThrow = null
         screen = Screen.Game

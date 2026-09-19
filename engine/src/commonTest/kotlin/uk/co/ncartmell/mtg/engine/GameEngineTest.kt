@@ -158,6 +158,82 @@ class GameEngineTest {
         assertFailsWith<IllegalArgumentException> { GameEngine.rollDice(sides = 6, count = 21) }
     }
 
+    // --- seating ----------------------------------------------------------------------
+
+    private fun seated(order: List<Int>, players: Int = order.size) = GameEngine.newGame(
+        GameSettings(playerCount = players, startingLife = 20),
+        seats(players),
+        seatingOrder = order,
+    )
+
+    @Test
+    fun `turns follow the seating round the table, not the seat numbers`() {
+        // A two-by-two board seats 0 and 1 across the top and 2 and 3 across the bottom,
+        // so going clockwise is 0, 1, 3, 2 — seat 2 is opposite seat 1, not next to it.
+        var state = seated(listOf(0, 1, 3, 2))
+        state = GameEngine.nextTurn(state)
+        assertEquals(0, state.turnSeat)
+
+        state = GameEngine.nextTurn(state)
+        assertEquals(1, state.turnSeat)
+        state = GameEngine.nextTurn(state)
+        assertEquals(3, state.turnSeat, "clockwise goes to the far side, not to seat 2")
+        state = GameEngine.nextTurn(state)
+        assertEquals(2, state.turnSeat)
+        state = GameEngine.nextTurn(state)
+        assertEquals(0, state.turnSeat, "and round again")
+    }
+
+    @Test
+    fun `seating falls back to seat order when none is given`() {
+        var state = game(players = 4)
+        state = GameEngine.nextTurn(state)
+        state = GameEngine.nextTurn(state)
+        assertEquals(1, state.turnSeat)
+    }
+
+    @Test
+    fun `a seat that is out is skipped in seating order`() {
+        var state = seated(listOf(0, 1, 3, 2))
+        state = GameEngine.eliminate(state, 1, LossReason.Conceded)
+        state = GameEngine.nextTurn(state)
+        assertEquals(0, state.turnSeat)
+
+        state = GameEngine.nextTurn(state)
+        assertEquals(3, state.turnSeat, "seat 1 is out, so the turn goes past it")
+    }
+
+    @Test
+    fun `several seats out in a row are all skipped`() {
+        var state = seated(listOf(0, 1, 3, 2))
+        state = GameEngine.eliminate(state, 1, LossReason.Conceded)
+        state = GameEngine.eliminate(state, 3, LossReason.Conceded)
+        state = GameEngine.nextTurn(state)
+        assertEquals(0, state.turnSeat)
+
+        state = GameEngine.nextTurn(state)
+        assertEquals(2, state.turnSeat)
+    }
+
+    @Test
+    fun `an interrupted turn passes to the next seat round, not the next number`() {
+        var state = seated(listOf(0, 1, 3, 2))
+        state = GameEngine.nextTurn(state)
+        assertEquals(0, state.turnSeat)
+        state = GameEngine.nextTurn(state)
+        assertEquals(1, state.turnSeat)
+
+        state = GameEngine.adjustLife(state, 1, -20)
+
+        assertEquals(3, state.turnSeat)
+    }
+
+    @Test
+    fun `restarting keeps the seating`() {
+        val state = GameEngine.restart(seated(listOf(0, 1, 3, 2)))
+        assertEquals(listOf(0, 1, 3, 2), state.seatingOrder)
+    }
+
     // --- star ------------------------------------------------------------------------
 
     private fun starGame() = GameEngine.newGame(

@@ -139,3 +139,29 @@ fun Color.readableOn(): Color {
     val luminance = 0.299 * red + 0.587 * green + 0.114 * blue
     return if (luminance > 0.55) Color(0xFF16181D) else Color(0xFFF6F6F4)
 }
+
+/**
+ * The order the seats run clockwise round the table, read off the board itself.
+ *
+ * Turns pass clockwise, and "clockwise" means what a player sees, not what the seat
+ * numbers happen to be: on a 2x2 board seats 0,1,2,3 sit top-left, top-right, bottom-left,
+ * bottom-right, so going round is 0, 1, 3, 2. Deriving it from the layout rather than
+ * writing it out per format means the two cannot drift apart.
+ *
+ * The traversal is the ring: across the top, down the right, back across the bottom, and
+ * up the left. Rows between the first and last are expected to hold a left seat and a
+ * right seat, which is what the Star board does.
+ */
+fun clockwiseOrder(rows: List<BoardRow>): List<Int> {
+    if (rows.isEmpty()) return emptyList()
+    if (rows.size == 1) return rows.single().seats.map { it.seat }
+
+    val top = rows.first().seats.map { it.seat }
+    val bottom = rows.last().seats.map { it.seat }.reversed()
+    val middle = rows.subList(1, rows.size - 1)
+    val downTheRight = middle.mapNotNull { it.seats.lastOrNull()?.seat }
+    val upTheLeft = middle.reversed().mapNotNull { row ->
+        row.seats.firstOrNull()?.seat?.takeIf { row.seats.size > 1 }
+    }
+    return top + downTheRight + bottom + upTheLeft
+}

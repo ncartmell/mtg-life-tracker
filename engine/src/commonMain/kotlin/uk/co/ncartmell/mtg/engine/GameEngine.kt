@@ -16,6 +16,7 @@ object GameEngine {
         settings: GameSettings,
         seats: List<SeatSetup>,
         startedAt: Long? = null,
+        seatingOrder: List<Int> = emptyList(),
     ): GameState {
         require(seats.size == settings.playerCount) {
             "Expected ${settings.playerCount} seats, got ${seats.size}"
@@ -28,6 +29,7 @@ object GameEngine {
             settings = settings,
             startedAt = startedAt,
             turnStartedAt = startedAt,
+            seatingOrder = seatingOrder,
             players = seats.mapIndexed { index, seat ->
                 PlayerState(
                     seat = index,
@@ -52,6 +54,7 @@ object GameEngine {
         settings = state.settings,
         startedAt = startedAt,
         turnStartedAt = startedAt,
+        seatingOrder = state.seatingOrder,
         players = state.players.map {
             it.copy(
                 life = state.settings.startingLife,
@@ -292,15 +295,8 @@ object GameEngine {
      * a turn they cannot take.
      */
     fun nextTurn(state: GameState, at: Long? = null): GameState {
-        val live = state.livePlayers.map { it.seat }.sorted()
-        if (live.isEmpty() || state.isFinished) return state
-        val current = state.turnSeat
-            ?: return state.copy(
-                turnSeat = live.first(),
-                turnCount = state.turnCount + 1,
-                turnStartedAt = at,
-            )
-        val next = live.firstOrNull { it > current } ?: live.first()
+        if (state.isFinished) return state
+        val next = state.nextLiveSeatAfter(state.turnSeat) ?: return state
         return state.copy(
             turnSeat = next,
             turnCount = state.turnCount + 1,
@@ -361,10 +357,8 @@ object GameEngine {
     private fun GameState.passTurnIfHolderIsOut(): GameState {
         val holder = turnSeat ?: return this
         if (!player(holder).isOut || isFinished) return this
-        val live = livePlayers.map { it.seat }.sorted()
-        if (live.isEmpty()) return copy(turnSeat = null)
         // Does not count as a new turn: the turn was interrupted, not taken.
-        return copy(turnSeat = live.firstOrNull { it > holder } ?: live.first())
+        return copy(turnSeat = nextLiveSeatAfter(holder))
     }
 
     private fun detectLoss(player: PlayerState, settings: GameSettings): LossReason? {
