@@ -14,16 +14,19 @@ Built artefacts are attached to each [release](https://github.com/ncartmell/mtg-
 
 | Platform | File | What you need to know |
 | --- | --- | --- |
-| Android | `mtg-life-tracker-<version>.apk` | Android 8.0 or newer. It is sideloaded, not from the Play Store, so Android will ask you to allow installs from whichever app you download it with. |
-| macOS (Apple Silicon) | `mtg-life-tracker-<version>-macos-arm64.dmg` | Not notarised, so Gatekeeper refuses it on a double-click. Right-click the app and choose Open the first time. |
+| Android | `…-<version>.apk` | Android 8.0 or newer. It is sideloaded, not from the Play Store, so Android will ask you to allow installs from whichever app you download it with. |
+| Windows | `…-windows.exe` | An installer. SmartScreen will warn about an unrecognised publisher — More info, then Run anyway. |
+| Windows (managed) | `…-windows-msi.msi` | The same thing as an MSI, for anyone deploying it centrally. |
+| macOS | `…-macos-arm64.dmg` / `…-macos-x64.dmg` | Not notarised, so Gatekeeper refuses it on a double-click. Right-click the app and choose Open the first time. |
+| Linux | `…-linux.deb` | Debian and Ubuntu derivatives. |
 
 Both are signed with my own key rather than a store identity, so both will warn you that
 the developer is unknown. That is expected for a build handed out this way, and it is the
 reason to check you got the file from this repository.
 
-Intel Macs, Windows and Linux are not built yet — the desktop packager only produces a
-package for the machine it runs on, and I only have the one. All three build fine from
-source; see [Running it](#running-it).
+The desktop packager only builds for the machine it runs on, so each of those comes off
+its own runner in `.github/workflows/release.yml`, which fires on a `v*` tag. The APK is
+built and signed locally, because the signing key is deliberately not in CI.
 
 iOS is not downloadable at all. Handing out an iOS build needs an Apple Developer Program
 membership and TestFlight, so building it from Xcode is the only route.

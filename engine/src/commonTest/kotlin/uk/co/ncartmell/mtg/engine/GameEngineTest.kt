@@ -23,6 +23,47 @@ class GameEngineTest {
         seats(players),
     )
 
+    // --- who goes first --------------------------------------------------------------
+
+    /** A die that hands out the values it is given, in order. */
+    private class ScriptedRandom(private val values: List<Int>) : Random() {
+        private var i = 0
+        override fun nextBits(bitCount: Int): Int = throw UnsupportedOperationException()
+        override fun nextInt(from: Int, until: Int): Int = values[i++]
+    }
+
+    @Test
+    fun `seat zero can win the roll like any other seat`() {
+        // Seat 0 rolls highest.
+        val state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(20, 3, 7, 11)),
+        )
+
+        assertEquals(0, state.startingSeat)
+        assertEquals(20, state.lastRoll?.results?.get(0))
+        assertEquals(0, state.lastRoll?.winningSeat)
+    }
+
+    @Test
+    fun `every seat is reported after a roll with no tie`() {
+        val state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(20, 3, 7, 11)),
+        )
+        assertEquals(setOf(0, 1, 2, 3), state.lastRoll?.results?.keys)
+    }
+
+    @Test
+    fun `seat zero still wins after a tie-break`() {
+        // Seats 0 and 2 tie on 18, then seat 0 wins the re-roll.
+        val state = GameEngine.rollForFirstPlayer(
+            game(players = 4),
+            random = ScriptedRandom(listOf(18, 4, 18, 9, 15, 2)),
+        )
+        assertEquals(0, state.startingSeat)
+    }
+
     // --- cannot lose -----------------------------------------------------------------
 
     @Test

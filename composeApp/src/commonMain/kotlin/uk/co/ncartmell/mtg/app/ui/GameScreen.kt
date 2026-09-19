@@ -188,14 +188,25 @@ private fun PlayerPanel(
     val shape = RoundedCornerShape(12.dp)
 
     Card(
-        // Whoever won the roll is outlined rather than labelled: at six players a panel is
-        // a third of the screen wide and a label is the first thing to get clipped.
-        modifier = if (goesFirst) modifier.border(3.dp, ink, shape) else modifier,
+        modifier = modifier,
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = background),
     ) {
         BoxWithConstraints(
+            // Whoever won the roll gets a ring rather than a label: at six players a panel
+            // is a third of the screen wide and a label is the first thing to get clipped.
+            //
+            // The ring is inset so that it lies wholly on the card. Its colour is the
+            // card's own ink, which is chosen to contrast with the card — but seat one's
+            // card is cream, so its ink is near-black, and a ring drawn on the card's edge
+            // sat against the near-black board and vanished. Every other seat has a light
+            // ink, which is why only seat one looked like it was never highlighted.
             Modifier.fillMaxSize()
+                .padding(RING_INSET)
+                .then(
+                    if (goesFirst) Modifier.border(RING_WIDTH, ink, RING_SHAPE)
+                    else Modifier,
+                )
                 .facing(facing)
                 .alpha(if (player.isOut) 0.45f else 1f),
         ) {
@@ -371,6 +382,11 @@ private fun Modifier.facing(facing: Facing): Modifier = when (facing) {
         }
         .rotate(facing.degrees)
 }
+
+/** The winner's ring, kept clear of the card's edge so it never meets the board behind. */
+private val RING_INSET = 3.dp
+private val RING_WIDTH = 3.dp
+private val RING_SHAPE = RoundedCornerShape(9.dp)
 
 private const val HOLD_BEFORE_REPEAT_MS = 400L
 private const val FIRST_REPEAT_MS = 180L

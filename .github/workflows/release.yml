@@ -1,0 +1,93 @@
+name: release
+
+# The desktop packager only ever builds for the machine it runs on, so each format
+# needs its own runner. Pushing a v* tag builds them all and attaches them to that
+# tag's release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            task: packageReleaseExe
+            glob: composeApp/build/compose/binaries/main-release/exe/*.exe
+          - name: windows-msi
+            os: windows-latest
+            task: packageReleaseMsi
+            glob: composeApp/build/compose/binaries/main-release/msi/*.msi
+          - name: linux
+            os: ubuntu-latest
+            task: packageReleaseDeb
+            glob: composeApp/build/compose/binaries/main-release/deb/*.deb
+          - name: macos-arm64
+            os: macos-14
+            task: packageReleaseDmg
+            glob: composeApp/build/compose/binaries/main-release/dmg/*.dmg
+          - name: macos-x64
+            os: macos-13
+            task: packageReleaseDmg
+            glob: composeApp/build/compose/binaries/main-release/dmg/*.dmg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # :composeApp is only included when an Android SDK is present. The desktop
+      # packaging tasks live in that module, so the SDK has to be there even though
+      # nothing here builds for Android.
+      - uses: android-actions/setup-android@v3
+
+      - name: Package
+        run: ./gradlew ${{ matrix.task }} --no-daemon
+        shell: bash
+
+      - name: Name the artefact by platform
+        id: stage
+        shell: bash
+        run: |
+          mkdir -p dist
+          for f in ${{ matrix.glob }}; do
+            ext="${f##*.}"
+            cp "$f" "dist/mtg-life-tracker-${GITHUB_REF_NAME#v}-${{ matrix.name }}.${ext}"
+          done
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Several matrix jobs race here, so creating is best-effort and uploading
+          # retries: whichever job gets there first wins and the rest just attach.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes \
+            || true
+          for attempt in 1 2 3; do
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber && exit 0
+            sleep 10
+          done
+          exit 1
