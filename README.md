@@ -19,6 +19,7 @@ Built artefacts are attached to each [release](https://github.com/ncartmell/mtg-
 | Windows (managed) | `…-windows-msi.msi` | The same thing as an MSI, for anyone deploying it centrally. |
 | macOS | `…-macos-arm64.dmg` / `…-macos-x64.dmg` | Not notarised, so Gatekeeper refuses it on a double-click. Right-click the app and choose Open the first time. |
 | Linux | `…-linux.deb` | Debian and Ubuntu derivatives. |
+| iOS | `…-ios-unsigned.ipa` | **Unsigned.** It will not install on its own. Re-sign it with your own Apple ID using AltStore, SideStore or Sideloadly, which is the usual route for an app that is not on the App Store. A free Apple ID gives a signature that lasts seven days before it needs refreshing. |
 
 Both are signed with my own key rather than a store identity, so both will warn you that
 the developer is unknown. That is expected for a build handed out this way, and it is the
@@ -28,15 +29,16 @@ The desktop packager only builds for the machine it runs on, so each of those co
 its own runner in `.github/workflows/release.yml`, which fires on a `v*` tag. The APK is
 built and signed locally, because the signing key is deliberately not in CI.
 
-iOS is not downloadable at all. Handing out an iOS build needs an Apple Developer Program
-membership and TestFlight, so building it from Xcode is the only route.
+The iOS build is unsigned because signing one for a device needs an Apple Developer
+Program membership. The `.ipa` itself is real and complete — what is missing is a
+signature, which the sideloading tools above add using your own Apple ID.
 
 ## What it does
 
 **Setting up a game**
 
-- Pick the number of players (2–6) and the starting life total; the board layout changes
-  to match
+- Pick a format, then the number of players it allows and a starting life total; the
+  board layout changes to match
 - Turn commander damage and poison counters on or off
 - Fill each seat with a saved profile or a guest
 - Give a player two commanders, tracked separately
@@ -50,8 +52,8 @@ membership and TestFlight, so building it from Xcode is the only route.
 - The board is all panels and no toolbar: the controls live behind one button where the
   panels meet, within reach of every seat
 - Life is adjusted by tapping anywhere down the left or right third of your own panel
-  rather than a small glyph; the middle third does nothing, so the card is still safe to
-  touch
+  rather than a small glyph. The middle third never changes life, which is why it is the
+  one place a swipe can safely mean something else
 - Hold instead of tap and it repeats, faster the longer you hold — a twenty-point swing,
   or ten poison counters, is one press rather than twenty. The same holds for poison and
   commander damage in a player's detail view
@@ -69,7 +71,15 @@ membership and TestFlight, so building it from Xcode is the only route.
   - **Emperor** (6) — two teams of three; a team falls the moment its emperor does,
     however healthy its generals are
 - Whose turn it is and how many turns have been taken, passed round in seat order and
-  skipping anyone who is out
+  skipping anyone who is out, with a game clock and a turn clock
+- Energy, experience, storm and commander tax alongside poison, shown on a panel only
+  once they are actually in play
+- The monarchy and the initiative, held by one player at a time and dropped by anyone who
+  is knocked out
+- Planechase, layered over any format: the planar die — four blanks, one chaos, one
+  planeswalk — and a note of whichever plane is in play
+- A swipe across the middle of a panel opens that player's detail. There is no button
+  competing with their name for the width
 - A roll screen: the whole table's roll for first player laid out in order, tie-breaks
   shown as the separate rounds they were, and ordinary dice from d4 to d20 plus a coin
 - Every finished game kept — seats, who won, how long — under the leaderboard, so the
@@ -87,6 +97,13 @@ membership and TestFlight, so building it from Xcode is the only route.
 - Roll to decide who goes first; every seat's number lands on its own panel and the
   winner's panel is outlined, rather than a single name appearing from nowhere
 - Restart with the same players and settings
+
+**Personalising**
+
+- A profile picks its own colour, how its panel is shaded, and what that panel says when
+  the player is knocked out
+- The last game's format, size and rules are offered again next time, so a regular group
+  starts a game in one tap
 
 **Between games**
 

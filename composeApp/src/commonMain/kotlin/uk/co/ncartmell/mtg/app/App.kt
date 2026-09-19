@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
@@ -47,10 +49,14 @@ fun App(state: AppState = remember { AppState() }) {
         // bar and home indicator sit on the dark ground rather than over a life total.
         Surface(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-                when (state.screen) {
-                    Screen.Setup -> SetupScreen(state)
-                    Screen.Game -> GameScreen(state)
-                    Screen.Leaderboard -> LeaderboardScreen(state)
+                // Screens fade rather than cut. Board to leaderboard and back is the one
+                // move made mid-game, and a hard cut reads as the app having restarted.
+                Crossfade(state.screen, animationSpec = tween(220), label = "screen") { screen ->
+                    when (screen) {
+                        Screen.Setup -> SetupScreen(state)
+                        Screen.Game -> GameScreen(state)
+                        Screen.Leaderboard -> LeaderboardScreen(state)
+                    }
                 }
             }
         }

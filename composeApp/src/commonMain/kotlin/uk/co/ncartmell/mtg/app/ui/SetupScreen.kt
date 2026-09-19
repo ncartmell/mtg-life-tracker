@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.Screen
+import uk.co.ncartmell.mtg.app.store.SetupMemory
 import uk.co.ncartmell.mtg.engine.Format
 import uk.co.ncartmell.mtg.engine.GameSettings
 import uk.co.ncartmell.mtg.engine.PanelStyle
@@ -45,19 +46,56 @@ import uk.co.ncartmell.mtg.engine.SeatSetup
 
 @Composable
 fun SetupScreen(state: AppState) {
-    var playerCount by remember { mutableStateOf(4) }
-    var startingLife by remember { mutableStateOf(40) }
-    var commanderDamage by remember { mutableStateOf(true) }
-    var poison by remember { mutableStateOf(true) }
-    var planechase by remember { mutableStateOf(false) }
-    var format by remember { mutableStateOf(Format.FREE_FOR_ALL) }
+    // Picks up where the last game left off rather than starting from the defaults.
+    val remembered = state.lastSetup
+    var playerCount by remember { mutableStateOf(remembered.playerCount) }
+    var startingLife by remember { mutableStateOf(remembered.startingLife) }
+    var commanderDamage by remember { mutableStateOf(remembered.commanderDamage) }
+    var poison by remember { mutableStateOf(remembered.poison) }
+    var planechase by remember { mutableStateOf(remembered.planechase) }
+    var format by remember { mutableStateOf(remembered.format) }
 
     // Seat assignments, indexed by seat. Null profile means a guest.
     val seatProfiles = remember { mutableStateListOfNulls(GameSettings.MAX_PLAYERS) }
     val seatCommanders = remember { mutableStateListOfOnes(GameSettings.MAX_PLAYERS) }
 
+    val start = {
+        val settings = GameSettings(
+            playerCount = playerCount,
+            startingLife = startingLife,
+            commanderDamageEnabled = commanderDamage,
+            poisonEnabled = poison,
+            format = format,
+            planechase = planechase,
+            poisonThreshold = GameSettings.defaultsFor(format).poisonThreshold,
+        )
+        val seats = (0 until playerCount).map { seat ->
+            val profile = seatProfiles[seat]?.let { state.book[it] }
+            SeatSetup(
+                name = profile?.name ?: "Player ${seat + 1}",
+                colour = profile?.colour ?: PlayerColour.entries[seat],
+                profileId = profile?.id,
+                commanderCount = if (commanderDamage) seatCommanders[seat] else 1,
+                defeatMessage = profile?.defeatMessage,
+                style = profile?.style ?: PanelStyle.SOLID,
+            )
+        }
+        state.rememberSetup(
+            SetupMemory(
+                format = format,
+                playerCount = playerCount,
+                startingLife = startingLife,
+                commanderDamage = commanderDamage,
+                poison = poison,
+                planechase = planechase,
+            ),
+        )
+        state.startGame(settings, seats)
+    }
+
+    Column(Modifier.fillMaxSize()) {
     LazyColumn(
-        Modifier.fillMaxSize().padding(16.dp),
+        Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
@@ -156,34 +194,20 @@ fun SetupScreen(state: AppState) {
 
         item { ProfileTrimmings(state) }
 
-        item {
-            Button(
-                onClick = {
-                    val settings = GameSettings(
-                        playerCount = playerCount,
-                        startingLife = startingLife,
-                        commanderDamageEnabled = commanderDamage,
-                        poisonEnabled = poison,
-                        format = format,
-                        planechase = planechase,
-                        poisonThreshold = GameSettings.defaultsFor(format).poisonThreshold,
-                    )
-                    val seats = (0 until playerCount).map { seat ->
-                        val profile = seatProfiles[seat]?.let { state.book[it] }
-                        SeatSetup(
-                            name = profile?.name ?: "Player ${seat + 1}",
-                            colour = profile?.colour ?: PlayerColour.entries[seat],
-                            profileId = profile?.id,
-                            commanderCount = if (commanderDamage) seatCommanders[seat] else 1,
-                            defeatMessage = profile?.defeatMessage,
-                            style = profile?.style ?: PanelStyle.SOLID,
-                        )
-                    }
-                    state.startGame(settings, seats)
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Start game") }
+        item { Box(Modifier.size(4.dp)) }
+    }
+
+    // Pinned, so starting a game never means scrolling past six seat cards to find the
+    // button — which is the single thing this screen exists to do.
+    Box(
+        Modifier.fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(16.dp),
+    ) {
+        Button(onClick = start, modifier = Modifier.fillMaxWidth()) {
+            Text("Start game")
         }
+    }
     }
 }
 

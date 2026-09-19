@@ -2,6 +2,17 @@ package uk.co.ncartmell.mtg.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -243,7 +254,21 @@ private fun PlayerPanel(
     val shape = RoundedCornerShape(12.dp)
     // A player who is out keeps their colour, but drained of it, so the board reads at a
     // glance: whoever still has a colour is still in.
-    val cardColour = if (player.isOut) player.colour.composeColor().drained() else background
+    val cardColour by animateColorAsState(
+        targetValue = if (player.isOut) background.drained() else background,
+        animationSpec = tween(450),
+        label = "card",
+    )
+
+    val ringWidth by animateDpAsState(
+        targetValue = when {
+            hasWon -> WIN_RING_WIDTH
+            goesFirst -> RING_WIDTH
+            else -> 0.dp
+        },
+        animationSpec = tween(320),
+        label = "ring",
+    )
 
     Card(
         modifier = modifier,
@@ -264,13 +289,11 @@ private fun PlayerPanel(
                 .then(paint?.let { Modifier.background(it) } ?: Modifier)
                 .padding(RING_INSET)
                 .then(
-                    when {
-                        // The winner's ring is heavier than the first-player one, and
-                        // outlives it: the roll stops mattering once someone has won.
-                        hasWon -> Modifier.border(WIN_RING_WIDTH, ink, RING_SHAPE)
-                        goesFirst -> Modifier.border(RING_WIDTH, ink, RING_SHAPE)
-                        else -> Modifier
-                    },
+                    // The winner's ring is heavier than the first-player one, and
+                    // outlives it: the roll stops mattering once someone has won. Its
+                    // width animates, so it grows onto the card rather than appearing.
+                    if (ringWidth > 0.dp) Modifier.border(ringWidth, ink, RING_SHAPE)
+                    else Modifier,
                 )
                 .facing(facing),
         ) {
@@ -282,9 +305,9 @@ private fun PlayerPanel(
             // suit the panel. Sizes are stepped rather than continuous so that a life
             // total does not visibly resize on every single point of damage.
             val lifeSize = when (player.life.toString().length) {
-                in 0..2 -> if (tight) 34.sp else 48.sp
-                3 -> if (tight) 26.sp else 40.sp
-                else -> if (tight) 20.sp else 30.sp
+                in 0..2 -> if (tight) 40.sp else 62.sp
+                3 -> if (tight) 30.sp else 48.sp
+                else -> if (tight) 23.sp else 36.sp
             }
 
             val openDetail = onOpenDetail
@@ -376,16 +399,34 @@ private fun PlayerPanel(
                             // digits off at the edges. Splitting the remainder still leaves
                             // each glyph inside the third that responds to it.
                             StepGlyph("\u2212", ink, glyphSize, Modifier.weight(1f))
-                            Text(
-                                player.life.toString(),
-                                color = ink,
-                                fontSize = lifeSize,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                softWrap = false,
+                            // Slides the way the total moved, so a change is visible
+                            // even to someone who was not looking at that panel.
+                            AnimatedContent(
+                                targetState = player.life,
+                                transitionSpec = {
+                                    val down = targetState < initialState
+                                    val h = if (down) -1 else 1
+                                    (
+                                        slideInVertically(tween(180)) { it * h / 3 } +
+                                            fadeIn(tween(180))
+                                        ) togetherWith (
+                                        slideOutVertically(tween(180)) { -it * h / 3 } +
+                                            fadeOut(tween(180))
+                                        )
+                                },
                                 modifier = Modifier.padding(horizontal = 2.dp),
-                            )
+                                label = "life",
+                            ) { life ->
+                                Text(
+                                    life.toString(),
+                                    color = ink,
+                                    fontSize = lifeSize,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            }
                             StepGlyph("+", ink, glyphSize, Modifier.weight(1f))
                         }
                     }
@@ -409,8 +450,16 @@ private fun PlayerPanel(
                         else MaterialTheme.typography.titleSmall,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (game.monarchSeat == player.seat) TokenBadge("Monarch", ink, tight)
-                    if (game.initiativeSeat == player.seat) TokenBadge("Initiative", ink, tight)
+                    AnimatedVisibility(
+                        visible = game.monarchSeat == player.seat,
+                        enter = scaleIn(tween(200)) + fadeIn(tween(200)),
+                        exit = fadeOut(tween(150)),
+                    ) { TokenBadge("Monarch", ink, tight) }
+                    AnimatedVisibility(
+                        visible = game.initiativeSeat == player.seat,
+                        enter = scaleIn(tween(200)) + fadeIn(tween(200)),
+                        exit = fadeOut(tween(150)),
+                    ) { TokenBadge("Initiative", ink, tight) }
                 }
 
                 FlowRow(

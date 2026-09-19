@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import uk.co.ncartmell.mtg.app.store.HistoryRepository
 import uk.co.ncartmell.mtg.app.store.ProfileRepository
+import uk.co.ncartmell.mtg.app.store.SetupMemory
+import uk.co.ncartmell.mtg.app.store.SetupRepository
 import uk.co.ncartmell.mtg.app.store.createStorage
 import uk.co.ncartmell.mtg.app.store.nowMillis
 import uk.co.ncartmell.mtg.engine.Counter
@@ -33,6 +35,7 @@ enum class Screen { Setup, Game, Leaderboard }
 class AppState(
     private val profiles: ProfileRepository = ProfileRepository(createStorage()),
     private val history: HistoryRepository = HistoryRepository(createStorage()),
+    private val setups: SetupRepository = SetupRepository(createStorage()),
     private val random: Random = Random,
     private val clock: () -> Long = ::nowMillis,
 ) {
@@ -52,6 +55,15 @@ class AppState(
     /** The last face of the planar die, kept so the board can show it. */
     var lastPlanarFace by mutableStateOf<PlanarFace?>(null)
         private set
+
+    /** How the last game was set up, offered again as the starting point for the next. */
+    var lastSetup by mutableStateOf(setups.load())
+        private set
+
+    fun rememberSetup(memory: SetupMemory) {
+        lastSetup = memory
+        setups.save(memory)
+    }
 
     var game by mutableStateOf<GameState?>(null)
         private set

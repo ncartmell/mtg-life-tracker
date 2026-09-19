@@ -106,3 +106,61 @@ jobs:
             sleep 10
           done
           exit 1
+
+  ios:
+    name: ios-unsigned
+    runs-on: macos-14
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      # Unsigned deliberately. Signing for a device needs an Apple Developer Program
+      # membership; this produces the same .ipa, which AltStore, SideStore or Sideloadly
+      # re-sign with the installing person's own Apple ID.
+      - name: Build for device, unsigned
+        run: |
+          xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
+            -configuration Release -sdk iphoneos -derivedDataPath build/ios-device \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            ONLY_ACTIVE_ARCH=NO build
+
+      - name: Wrap it as an ipa
+        run: |
+          mkdir -p payload/Payload dist
+          cp -R build/ios-device/Build/Products/Release-iphoneos/iosApp.app payload/Payload/
+          (cd payload && zip -qr "../dist/mtg-life-tracker-${TAG#v}-ios-unsigned.ipa" Payload)
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned
+          path: dist/*
+
+      - name: Attach to the release
+        if: startsWith(env.TAG, 'v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --generate-notes \
+            || true
+          for attempt in 1 2 3; do
+            gh release upload "$TAG" dist/* --clobber && exit 0
+            sleep 10
+          done
+          exit 1
