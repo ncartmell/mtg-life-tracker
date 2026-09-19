@@ -1,5 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -7,6 +8,17 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.androidApplication)
+}
+
+/**
+ * Release signing, read from a file that is not in the repository.
+ *
+ * A checkout without it still builds — the release APK simply comes out unsigned, which
+ * is fine for compiling and useless for installing. See keystore.properties.example.
+ */
+val signing = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use(::load)
 }
 
 kotlin {
@@ -53,7 +65,18 @@ android {
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        if (signing.getProperty("storePassword").orEmpty().isNotBlank()) {
+            create("release") {
+                storeFile = rootProject.file(signing.getProperty("storeFile"))
+                storePassword = signing.getProperty("storePassword")
+                keyAlias = signing.getProperty("keyAlias")
+                keyPassword = signing.getProperty("keyPassword")
+            }
+        }
     }
 
     compileOptions {
@@ -64,6 +87,7 @@ android {
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 }
@@ -71,6 +95,14 @@ android {
 compose.desktop {
     application {
         mainClass = "uk.co.ncartmell.mtg.app.MainKt"
+
+        // The ProGuard bundled with the Compose plugin cannot read Java 21 class files,
+        // and a life tracker has nothing worth shrinking or obfuscating. Ship it plain
+        // rather than carry keep-rules for a step that buys nothing here.
+        buildTypes.release.proguard {
+            isEnabled.set(false)
+        }
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "MTG Life Tracker"

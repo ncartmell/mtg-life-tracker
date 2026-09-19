@@ -8,6 +8,26 @@ players and every panel turns to face the person it belongs to. On the four-play
 that is a quarter turn — two players sit down each side, and their panels read along the
 card's long axis, which is roughly twice the room for a life total.
 
+## Download
+
+Built artefacts are attached to each [release](https://github.com/ncartmell/mtg-life-tracker/releases/latest).
+
+| Platform | File | What you need to know |
+| --- | --- | --- |
+| Android | `mtg-life-tracker-<version>.apk` | Android 8.0 or newer. It is sideloaded, not from the Play Store, so Android will ask you to allow installs from whichever app you download it with. |
+| macOS (Apple Silicon) | `mtg-life-tracker-<version>-macos-arm64.dmg` | Not notarised, so Gatekeeper refuses it on a double-click. Right-click the app and choose Open the first time. |
+
+Both are signed with my own key rather than a store identity, so both will warn you that
+the developer is unknown. That is expected for a build handed out this way, and it is the
+reason to check you got the file from this repository.
+
+Intel Macs, Windows and Linux are not built yet — the desktop packager only produces a
+package for the machine it runs on, and I only have the one. All three build fine from
+source; see [Running it](#running-it).
+
+iOS is not downloadable at all. Handing out an iOS build needs an Apple Developer Program
+membership and TestFlight, so building it from Xcode is the only route.
+
 ## What it does
 
 **Setting up a game**
@@ -80,6 +100,21 @@ and whose tests run on any JDK with no emulator, simulator or Android SDK in sig
 
 **iOS** — open `iosApp/iosApp.xcodeproj` in Xcode and run. The shared framework is built
 by Gradle as part of the Xcode build.
+
+**Release builds**
+
+```sh
+./gradlew :composeApp:assembleRelease                    # APK
+./gradlew :composeApp:packageReleaseDistributionForCurrentOS   # .dmg, .msi or .deb
+```
+
+The APK is signed from `keystore.properties`, which is not in the repository — copy
+`keystore.properties.example` and follow the comment in it to generate a keystore. Without
+that file the release APK still builds, it is simply unsigned and will not install.
+
+Keep the keystore and its passwords backed up. Android only installs an update over an
+existing install when both are signed with the same key, so losing it means every user has
+to uninstall before they can upgrade.
 
 **Tests**
 

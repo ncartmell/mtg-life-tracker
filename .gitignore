@@ -6,3 +6,7 @@ build/
 .DS_Store
 .kotlin/
 xcuserdata/
+
+# Release signing — the key and its passwords never go in the repository.
+release.keystore
+keystore.properties
