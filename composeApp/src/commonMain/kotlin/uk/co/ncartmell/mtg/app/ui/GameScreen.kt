@@ -244,6 +244,14 @@ private fun BoardMenu(
                     }
                 }
 
+                // Near the top because it is reached in a hurry: the glyphs repeat while
+                // held, so the usual reason to open this menu at all is having overshot.
+                OutlinedButton(
+                    onClick = { state.undo(); onDismiss() },
+                    enabled = state.canUndo,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Undo last change") }
+
                 OutlinedButton(
                     onClick = onOpenRoll,
                     modifier = Modifier.fillMaxWidth(),

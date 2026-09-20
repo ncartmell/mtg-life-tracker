@@ -35,8 +35,9 @@ enum class Screen { Setup, Game, Leaderboard }
 /**
  * Holds everything the UI needs and forwards every rule decision to the engine.
  *
- * There is deliberately no logic here beyond wiring: if a behaviour is worth testing it
- * belongs in `:engine`, which has no Compose dependency and runs its tests on any JDK.
+ * Rule decisions belong in `:engine`, which has no Compose dependency and runs its tests
+ * on any JDK. What is left here is wiring, and the two things wiring alone gets wrong:
+ * recording a finished game exactly once, and stepping back out of a mistake.
  */
 class AppState(
     private val profiles: ProfileRepository = ProfileRepository(createStorage()),
@@ -80,6 +81,34 @@ class AppState(
 
     /** True once the finished game has been written to the profiles, so it counts once. */
     private var resultRecorded = resumed?.resultRecorded ?: false
+
+    /**
+     * One step back, holding everything a single change can touch.
+     *
+     * Not just the game: finishing one writes to the leaderboard and the history as well,
+     * so undoing the knockout that ended it has to take those back too, or the win stays
+     * counted against somebody who did not win.
+     */
+    private data class Step(
+        val game: GameState,
+        val book: ProfileBook,
+        val games: GameHistory,
+        val resultRecorded: Boolean,
+    )
+
+    /**
+     * Deliberately not saved with the game. The game itself is what has to survive being
+     * killed; how the table arrived at it does not, and writing twenty copies of it on
+     * every press of a held minus would make the one genuinely hot write in the app
+     * twenty times the size.
+     */
+    private var past by mutableStateOf<List<Step>>(emptyList())
+
+    val canUndo: Boolean get() = past.isNotEmpty()
+
+    /** What the last change was, and when, so a held run folds into one step. */
+    private var lastKind: String? = null
+    private var lastAt = 0L
 
     // --- navigation ------------------------------------------------------------------
 
@@ -140,18 +169,44 @@ class AppState(
         resultRecorded = false
         lastThrow = null
         screen = Screen.Game
+        past = emptyList()
+        lastKind = null
+        persist()
+    }
+
+    /**
+     * Steps back to before the last change, leaderboard and history included.
+     *
+     * A mis-tap is the ordinary way to lose work here — the glyphs repeat while held, so
+     * overshooting is easy, and tapping back the other way is only tolerable for life.
+     */
+    fun undo() {
+        val step = past.lastOrNull() ?: return
+        // Whatever run was in progress has been taken back, so the next change starts a
+        // step of its own rather than folding into the one just undone.
+        lastKind = null
+        past = past.dropLast(1)
+        game = step.game
+        resultRecorded = step.resultRecorded
+        // Only written back when they actually moved, so an ordinary undo does not
+        // rewrite the profile list on every press.
+        if (step.book != book) book = step.book.also(profiles::save)
+        if (step.games != games) games = step.games.also(history::save)
         persist()
     }
 
     fun restart() {
-        // Cleared before the game is replaced, not after: updateGame is what writes the
-        // game to storage, and it writes this flag alongside it. Setting it afterwards
-        // saved the new game still marked as already recorded, and a restart that was
-        // interrupted then came back as a game whose result could never be counted.
+        val current = game ?: return
+        // Snapshot before anything moves, so what is remembered is the game as it stood
+        // and the flag as it stood with it. Restarting does not go through updateGame:
+        // a restarted game is never finished, so there is no result to record.
+        remember(current)
+        lastKind = null
         resultRecorded = false
         lastThrow = null
         lastPlanarFace = null
-        updateGame { GameEngine.restart(it, startedAt = clock()) }
+        game = GameEngine.restart(current, startedAt = clock())
+        persist()
     }
 
     fun rollForFirstPlayer() =
@@ -160,7 +215,7 @@ class AppState(
     fun nextTurn() = updateGame { GameEngine.nextTurn(it, at = clock()) }
 
     fun adjustCounter(seat: Int, counter: Counter, delta: Int) =
-        updateGame { GameEngine.adjustCounter(it, seat, counter, delta) }
+        updateGame("counter:$seat:$counter") { GameEngine.adjustCounter(it, seat, counter, delta) }
 
     fun setMonarch(seat: Int?) = updateGame { GameEngine.setMonarch(it, seat) }
 
@@ -195,15 +250,17 @@ class AppState(
         lastPlanarFace = null
     }
 
-    fun adjustLife(seat: Int, delta: Int) = updateGame { GameEngine.adjustLife(it, seat, delta) }
+    fun adjustLife(seat: Int, delta: Int) =
+        updateGame("life:$seat") { GameEngine.adjustLife(it, seat, delta) }
 
-    fun adjustPoison(seat: Int, delta: Int) = updateGame { GameEngine.adjustPoison(it, seat, delta) }
+    fun adjustPoison(seat: Int, delta: Int) =
+        updateGame("poison:$seat") { GameEngine.adjustPoison(it, seat, delta) }
 
     fun adjustCommanderDamage(seat: Int, from: CommanderId, delta: Int) =
-        updateGame { GameEngine.adjustCommanderDamage(it, seat, from, delta) }
+        updateGame("cmdr:$seat:$from") { GameEngine.adjustCommanderDamage(it, seat, from, delta) }
 
     fun adjustCommanderTax(seat: Int, index: Int, delta: Int) =
-        updateGame { GameEngine.adjustCommanderTax(it, seat, index, delta) }
+        updateGame("tax:$seat:$index") { GameEngine.adjustCommanderTax(it, seat, index, delta) }
 
     fun setCommanderCount(seat: Int, count: Int) =
         updateGame { GameEngine.setCommanderCount(it, seat, count) }
@@ -219,12 +276,31 @@ class AppState(
     fun leaveGame() {
         game = null
         screen = Screen.Setup
+        past = emptyList()
+        lastKind = null
         persist()
     }
 
-    private fun updateGame(block: (GameState) -> GameState) {
+    /**
+     * [kind] names what is being changed, for the changes that repeat while held.
+     *
+     * A hold is one gesture and should be one step back. Taking a player from forty to
+     * twenty-six in a single press is the ordinary way to overshoot, and undoing that a
+     * point at a time is no better than pressing the other glyph fourteen times. Changes
+     * that cannot repeat pass nothing, and always get a step of their own.
+     */
+    private fun updateGame(kind: String? = null, block: (GameState) -> GameState) {
         val current = game ?: return
         val next = block(current)
+        // Nothing moved, so there is nothing to step back to. Without this, minus on a
+        // counter already at zero would fill the stack with copies of the same game and
+        // undo would appear to do nothing several times running.
+        if (next == current) return
+        val at = clock()
+        val continuing = kind != null && kind == lastKind && at - lastAt <= COALESCE_MS
+        if (!continuing) remember(current)
+        lastKind = kind
+        lastAt = at
         game = next
         // Record the result the moment a game finishes, exactly once.
         if (next.isFinished && !resultRecorded) {
@@ -235,8 +311,21 @@ class AppState(
         persist()
     }
 
+    private fun remember(current: GameState) {
+        // Bounded, because an undo stack that grows for the length of a game is a memory
+        // leak with a friendly name. Nobody steps back twenty changes after a mis-tap.
+        past = (past + Step(current, book, games, resultRecorded)).takeLast(UNDO_DEPTH)
+    }
+
     /** Called wherever [game] changes, which is the only place it can become stale. */
     private fun persist() {
         game?.let { inProgress.save(SavedGame(it, resultRecorded)) } ?: inProgress.clear()
+    }
+
+    private companion object {
+        const val UNDO_DEPTH = 20
+
+        /** Comfortably longer than the gap between repeats of a held glyph. */
+        const val COALESCE_MS = 700L
     }
 }

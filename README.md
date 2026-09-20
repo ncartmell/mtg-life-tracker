@@ -108,6 +108,11 @@ signature, which the sideloading tools above add using your own Apple ID.
   applied the moment the flag is cleared, which is what happens when the permanent
   granting it dies
 - One button to knock a player out, for everything the app cannot see for itself
+- Undo, which steps back the last change — the leaderboard and the game history with it,
+  so taking back the knockout that ended a game also takes back the win it recorded. A
+  held glyph is one step rather than one per repeat, because overshooting a hold is the
+  ordinary way to need it and undoing that a point at a time would be no better than
+  pressing the other glyph back
 - A player removed by mistake can be brought back; whatever was lethal is lifted just
   clear of its threshold, so someone restored from zero life returns on one
 - Roll to decide who goes first; every seat's number lands on its own panel and the
@@ -201,7 +206,6 @@ start mid-game is worse.
 
 ## Not done yet
 
-- No undo history beyond restoring an eliminated player
 - Nothing is synced or shared between devices; each install keeps its own profiles,
   leaderboard and game history
 - The iOS build is unsigned, so it needs re-signing before it will install

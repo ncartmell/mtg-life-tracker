@@ -54,6 +54,12 @@ kotlin {
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
         }
+        // AppState holds the two things wiring alone gets wrong — recording a finished
+        // game exactly once, and stepping back out of a mistake — and neither is a rule,
+        // so neither belongs in :engine. They are worth testing all the same.
+        commonTest.dependencies {
+            implementation(libs.kotlin.test)
+        }
     }
 }
 
