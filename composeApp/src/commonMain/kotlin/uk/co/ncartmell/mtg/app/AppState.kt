@@ -9,6 +9,7 @@ import uk.co.ncartmell.mtg.app.ui.clockwiseOrder
 import uk.co.ncartmell.mtg.app.store.ProfileRepository
 import uk.co.ncartmell.mtg.app.store.SetupMemory
 import uk.co.ncartmell.mtg.app.store.SetupRepository
+import uk.co.ncartmell.mtg.app.store.GameRepository
 import uk.co.ncartmell.mtg.app.store.createStorage
 import uk.co.ncartmell.mtg.app.store.nowMillis
 import uk.co.ncartmell.mtg.engine.Counter
@@ -22,6 +23,9 @@ import uk.co.ncartmell.mtg.engine.GameSettings
 import uk.co.ncartmell.mtg.engine.GameState
 import uk.co.ncartmell.mtg.engine.LossReason
 import uk.co.ncartmell.mtg.engine.PlayerColour
+import uk.co.ncartmell.mtg.engine.SavedGame
+import uk.co.ncartmell.mtg.engine.TimeOfDay
+import uk.co.ncartmell.mtg.engine.UndercityRoom
 import uk.co.ncartmell.mtg.engine.ProfileBook
 import uk.co.ncartmell.mtg.engine.SeatSetup
 import kotlin.random.Random
@@ -38,10 +42,14 @@ class AppState(
     private val profiles: ProfileRepository = ProfileRepository(createStorage()),
     private val history: HistoryRepository = HistoryRepository(createStorage()),
     private val setups: SetupRepository = SetupRepository(createStorage()),
+    private val inProgress: GameRepository = GameRepository(createStorage()),
     private val random: Random = Random,
     private val clock: () -> Long = ::nowMillis,
 ) {
-    var screen by mutableStateOf(Screen.Setup)
+    /** Whatever was on the table when the app last stopped. Read once, before anything. */
+    private val resumed = inProgress.load()
+
+    var screen by mutableStateOf(if (resumed == null) Screen.Setup else Screen.Game)
         private set
 
     var book by mutableStateOf(profiles.load())
@@ -67,11 +75,11 @@ class AppState(
         setups.save(memory)
     }
 
-    var game by mutableStateOf<GameState?>(null)
+    var game by mutableStateOf(resumed?.game)
         private set
 
     /** True once the finished game has been written to the profiles, so it counts once. */
-    private var resultRecorded = false
+    private var resultRecorded = resumed?.resultRecorded ?: false
 
     // --- navigation ------------------------------------------------------------------
 
@@ -132,13 +140,18 @@ class AppState(
         resultRecorded = false
         lastThrow = null
         screen = Screen.Game
+        persist()
     }
 
     fun restart() {
-        updateGame { GameEngine.restart(it, startedAt = clock()) }
+        // Cleared before the game is replaced, not after: updateGame is what writes the
+        // game to storage, and it writes this flag alongside it. Setting it afterwards
+        // saved the new game still marked as already recorded, and a restart that was
+        // interrupted then came back as a game whose result could never be counted.
         resultRecorded = false
         lastThrow = null
         lastPlanarFace = null
+        updateGame { GameEngine.restart(it, startedAt = clock()) }
     }
 
     fun rollForFirstPlayer() =
@@ -152,6 +165,20 @@ class AppState(
     fun setMonarch(seat: Int?) = updateGame { GameEngine.setMonarch(it, seat) }
 
     fun setInitiative(seat: Int?) = updateGame { GameEngine.setInitiative(it, seat) }
+
+    fun setCitysBlessing(seat: Int, value: Boolean) =
+        updateGame { GameEngine.setCitysBlessing(it, seat, value) }
+
+    fun setTimeOfDay(value: TimeOfDay) = updateGame { GameEngine.setTimeOfDay(it, value) }
+
+    /** Where this seat could venture next; empty when there is no game. */
+    fun ventureOptions(seat: Int): List<UndercityRoom> =
+        game?.let { GameEngine.ventureOptions(it, seat) } ?: emptyList()
+
+    fun ventureTo(seat: Int, room: UndercityRoom) =
+        updateGame { GameEngine.ventureTo(it, seat, room) }
+
+    fun leaveUndercity(seat: Int) = updateGame { GameEngine.leaveUndercity(it, seat) }
 
     fun rollPlanarDie() {
         lastPlanarFace = GameEngine.rollPlanarDie(random)
@@ -175,6 +202,9 @@ class AppState(
     fun adjustCommanderDamage(seat: Int, from: CommanderId, delta: Int) =
         updateGame { GameEngine.adjustCommanderDamage(it, seat, from, delta) }
 
+    fun adjustCommanderTax(seat: Int, index: Int, delta: Int) =
+        updateGame { GameEngine.adjustCommanderTax(it, seat, index, delta) }
+
     fun setCommanderCount(seat: Int, count: Int) =
         updateGame { GameEngine.setCommanderCount(it, seat, count) }
 
@@ -189,6 +219,7 @@ class AppState(
     fun leaveGame() {
         game = null
         screen = Screen.Setup
+        persist()
     }
 
     private fun updateGame(block: (GameState) -> GameState) {
@@ -201,5 +232,11 @@ class AppState(
             book = book.recordResult(next).also(profiles::save)
             games = games.record(next, clock()).also(history::save)
         }
+        persist()
+    }
+
+    /** Called wherever [game] changes, which is the only place it can become stale. */
+    private fun persist() {
+        game?.let { inProgress.save(SavedGame(it, resultRecorded)) } ?: inProgress.clear()
     }
 }

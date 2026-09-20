@@ -74,10 +74,20 @@ signature, which the sideloading tools above add using your own Apple ID.
   as it is actually drawn — on a two-by-two board that is top-left, top-right,
   bottom-right, bottom-left, not seat order — skipping anyone who is out, with a game
   clock and a turn clock
-- Energy, experience, storm and commander tax alongside poison, shown on a panel only
-  once they are actually in play
+- Energy, experience, storm, rad, the Ring and speed alongside poison, shown on a panel
+  only once they are actually in play, and offered in the detail view the same way: a
+  counter in play gets a row, the rest are one tap away. The Ring and speed stop at four,
+  which a held press would otherwise run past in under a second
+- Commander tax per commander rather than per player, so a pair of partners each climb
+  their own ladder. It sits with the commanders, and shows what the next cast will cost
 - The monarchy and the initiative, held by one player at a time and dropped by anyone who
-  is knocked out
+  is knocked out. They are the only two designations in the game that work that way
+- The city's blessing, which reads like them and is not: Ascend is permanent, and the
+  whole table can have it at once, so it is a flag on each player rather than a seat
+- Day and night, or neither, as one value for the table
+- The Undercity, room by room, since taking the initiative is what sends you into it.
+  Each player walks their own, every room carries its own text, and the branch at most
+  rooms is offered as a choice rather than guessed at
 - Planechase, layered over any format: the planar die — four blanks, one chaos, one
   planeswalk — and a note of whichever plane is in play
 - A swipe across the middle of a panel opens that player's detail. There is no button
@@ -87,6 +97,10 @@ signature, which the sideloading tools above add using your own Apple ID.
 - Every finished game kept — seats, who won, how long — under the leaderboard, so the
   running totals can be traced back to the games behind them
 - The screen is held awake while a game is on
+- A launch screen on both platforms, the same ink and the same mark, rather than a white
+  page while the app starts
+- The game is written down as it is played, so a phone that kills the app in the
+  background hands the table back the same game rather than an empty setup screen
 - A player who is out has their colour drained away and is marked plainly, so the board
   reads at a glance; the winner is ringed and labelled on the board, not only in a dialog
 - A player can be marked as unable to lose, for Platinum Angel and the like. Counters are
@@ -172,13 +186,14 @@ The engine tests run without an Android SDK or Xcode. If neither is installed,
 
 ## Storage
 
-Profiles are stored locally on each platform through a deliberately small interface:
+Profiles, the leaderboard, game history and the game in progress are stored locally on
+each platform through a deliberately small interface:
 
 | Platform | Backing store |
 | --- | --- |
 | Android | `SharedPreferences` |
 | iOS | `NSUserDefaults` |
-| Desktop | A JSON file under `~/.mtg-life-tracker`, written via a temporary file |
+| Desktop | A JSON file under `~/.mtg-life-tracker`, written via a temporary file and moved into place atomically |
 
 Reads are tolerant — an unreadable or missing store starts an empty profile list rather
 than refusing to open. Losing a leaderboard is annoying; a life tracker that will not

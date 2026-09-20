@@ -88,6 +88,8 @@ import uk.co.ncartmell.mtg.app.Screen
 import uk.co.ncartmell.mtg.engine.CommanderId
 import uk.co.ncartmell.mtg.engine.Counter
 import uk.co.ncartmell.mtg.engine.PanelStyle
+import uk.co.ncartmell.mtg.engine.TimeOfDay
+import uk.co.ncartmell.mtg.engine.UndercityRoom
 import uk.co.ncartmell.mtg.engine.PlanarFace
 import uk.co.ncartmell.mtg.engine.GameOutcome
 import uk.co.ncartmell.mtg.engine.GameState
@@ -187,6 +189,7 @@ private fun MenuButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BoardMenu(
     state: AppState,
@@ -221,6 +224,24 @@ private fun BoardMenu(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+
+                // One value for the table, so it belongs here rather than on a panel.
+                Text(
+                    "Day and night",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TimeOfDay.entries.forEach { value ->
+                        if (game.timeOfDay == value) {
+                            Button(onClick = { state.setTimeOfDay(value) }) { Text(value.label) }
+                        } else {
+                            OutlinedButton(
+                                onClick = { state.setTimeOfDay(value) },
+                            ) { Text(value.label) }
+                        }
+                    }
                 }
 
                 OutlinedButton(
@@ -561,6 +582,11 @@ private fun PlayerPanel(
                         enter = scaleIn(tween(200)) + fadeIn(tween(200)),
                         exit = fadeOut(tween(150)),
                     ) { TokenBadge("Initiative", ink, tight) }
+                    AnimatedVisibility(
+                        visible = player.citysBlessing,
+                        enter = scaleIn(tween(200)) + fadeIn(tween(200)),
+                        exit = fadeOut(tween(150)),
+                    ) { TokenBadge(if (tight) "Bless" else "City's blessing", ink, tight) }
                 }
 
                 FlowRow(
@@ -1146,20 +1172,60 @@ private fun PlayerDetailDialog(
                             }
                         }
                     }
+
+                    // Tax is charged per commander, so it belongs here with them rather
+                    // than in the counter list, where one number had to stand for both.
+                    repeat(player.commanderCount) { index ->
+                        val name = if (player.commanderCount > 1) {
+                            "Casts of #${index + 1}"
+                        } else {
+                            "Times cast"
+                        }
+                        // The surcharge only once there is one: "(+0)" is noise, and the
+                        // row is one line, so anything longer is simply cut off.
+                        val surcharge = player.taxOn(index) * 2
+                        Adjuster(
+                            label = name + if (surcharge > 0) " (+$surcharge)" else "",
+                            value = player.taxOn(index),
+                            onMinus = { state.adjustCommanderTax(player.seat, index, -1) },
+                            onPlus = { state.adjustCommanderTax(player.seat, index, 1) },
+                        )
+                    }
                 }
 
+                // Every counter used to be on show whether or not it was in play, which
+                // was four ragged rows of pills for numbers that were all zero — and one
+                // row worse with each counter added. The board has always shown only what
+                // is in play; this now agrees with it. A counter in play gets the same
+                // full-width row as poison and commander damage, and the rest are one tap
+                // away rather than permanently underfoot.
                 DialogSection("Counters")
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Counter.entries.forEach { counter ->
-                        CounterStepper(
-                            label = counter.label,
-                            value = player[counter],
-                            onMinus = { state.adjustCounter(player.seat, counter, -1) },
-                            onPlus = { state.adjustCounter(player.seat, counter, 1) },
-                        )
+                var opened by remember(player.seat) {
+                    mutableStateOf(player.activeCounters.map { it.first }.toSet())
+                }
+                val inPlay = Counter.entries.filter { it in opened || player[it] != 0 }
+                inPlay.forEach { counter ->
+                    Adjuster(
+                        label = counter.label +
+                            (counter.max?.let { " (max $it)" } ?: ""),
+                        value = player[counter],
+                        onMinus = { state.adjustCounter(player.seat, counter, -1) },
+                        onPlus = { state.adjustCounter(player.seat, counter, 1) },
+                    )
+                }
+                val unused = Counter.entries.filterNot { it in inPlay }
+                if (unused.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        unused.forEach { counter ->
+                            OutlinedButton(
+                                // Kept on screen once opened, even back at zero, so a row
+                                // does not vanish from under the finger that just used it.
+                                onClick = { opened = opened + counter },
+                            ) { Text("+ " + counter.label) }
+                        }
                     }
                 }
 
@@ -1183,6 +1249,50 @@ private fun PlayerDetailDialog(
                         OutlinedButton(
                             onClick = { state.setInitiative(player.seat) },
                         ) { Text("Take initiative") }
+                    }
+                    // Sits with the other two because it reads like them, but it is not
+                    // taken from anybody: Ascend is permanent, and the whole table can
+                    // have it at once.
+                    if (player.citysBlessing) {
+                        Button(
+                            onClick = { state.setCitysBlessing(player.seat, false) },
+                        ) { Text("City's blessing") }
+                    } else {
+                        OutlinedButton(
+                            onClick = { state.setCitysBlessing(player.seat, true) },
+                        ) { Text("Ascend") }
+                    }
+                }
+
+                // The initiative sends its holder into the Undercity, so the dungeon
+                // lives next to it rather than behind a rule of its own.
+                DialogSection("Undercity")
+                player.undercityRoom?.let { room ->
+                    Text(room.label, fontWeight = FontWeight.SemiBold)
+                    Text(room.effect, style = MaterialTheme.typography.labelMedium)
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val options = state.ventureOptions(player.seat)
+                    val fresh = player.undercityRoom == null
+                    options.forEach { room ->
+                        OutlinedButton(onClick = { state.ventureTo(player.seat, room) }) {
+                            Text(
+                                when {
+                                    fresh -> "Venture in"
+                                    options.size == 1 && room == UndercityRoom.SECRET_ENTRANCE ->
+                                        "Venture again"
+                                    else -> room.label
+                                },
+                            )
+                        }
+                    }
+                    if (!fresh) {
+                        TextButton(
+                            onClick = { state.leaveUndercity(player.seat) },
+                        ) { Text("Leave") }
                     }
                 }
 
@@ -1275,42 +1385,6 @@ private fun DialogSection(title: String) {
     }
 }
 
-/**
- * A counter as one compact control rather than a full-width row.
- *
- * Four counters as four rows of label-plus-two-buttons turned the dialog into a wall of
- * identical rows; as pills they take two rows between them and read as a set.
- */
-@Composable
-private fun CounterStepper(label: String, value: Int, onMinus: () -> Unit, onPlus: () -> Unit) {
-    val shape = RoundedCornerShape(20.dp)
-    Row(
-        Modifier.clip(shape).border(1.dp, MaterialTheme.colorScheme.outline, shape),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StepGlyph(
-            "−", MaterialTheme.colorScheme.primary, 18.sp,
-            Modifier.clip(CircleShape).clickable(onClick = onMinus).padding(10.dp),
-        )
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-            Text(
-                value.toString(),
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium,
-            )
-        }
-        StepGlyph(
-            "+", MaterialTheme.colorScheme.primary, 18.sp,
-            Modifier.clip(CircleShape).clickable(onClick = onPlus).padding(10.dp),
-        )
-    }
-}
 
 /**
  * An outlined button in all but name. It is hand-rolled because a [OutlinedButton] owns

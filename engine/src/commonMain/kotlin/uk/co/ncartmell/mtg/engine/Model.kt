@@ -55,11 +55,73 @@ data class PlayerProfile(
  * different job — the engine keeps them and otherwise leaves them alone.
  */
 @Serializable
-enum class Counter(val label: String, val short: String) {
+enum class Counter(val label: String, val short: String, val max: Int? = null) {
     ENERGY("Energy", "E"),
     EXPERIENCE("Experience", "XP"),
     STORM("Storm", "Storm"),
-    COMMANDER_TAX("Commander tax", "Tax"),
+    /** Fallout's rad counters: like poison in shape, but they mill rather than kill. */
+    RAD("Rad", "Rad"),
+    /**
+     * How far the Ring has tempted you, which is what is worth writing down. Which
+     * creature is the Ring-bearer is not: it is a card sitting on the battlefield where
+     * everyone can see it, and the app has no notion of creatures to point at.
+     */
+    RING("Ring", "Ring", max = 4),
+    /** Start your engines: speed climbs to four and stops. */
+    SPEED("Speed", "Spd", max = 4),
+}
+
+/** Whether it is day or night, or neither, which is where every game starts. */
+enum class TimeOfDay(val label: String) {
+    NEITHER("Neither"),
+    DAY("Day"),
+    NIGHT("Night"),
+}
+
+/**
+ * The Undercity, room by room, taken verbatim from the token's own text.
+ *
+ * The initiative already had a home here; where its holder had got to did not. Venturing
+ * is the whole point of taking the initiative, and the branch at most rooms is a choice
+ * somebody has to remember between turns.
+ */
+enum class UndercityRoom(val label: String, val effect: String) {
+    SECRET_ENTRANCE(
+        "Secret Entrance",
+        "Search your library for a basic land card, reveal it, put it into your hand, " +
+            "then shuffle.",
+    ),
+    FORGE("Forge", "Put two +1/+1 counters on target creature."),
+    LOST_WELL("Lost Well", "Scry 2."),
+    TRAP("Trap!", "Target player loses 5 life."),
+    ARENA("Arena", "Goad target creature."),
+    STASH("Stash", "Create a Treasure token."),
+    ARCHIVES("Archives", "Draw a card."),
+    CATACOMBS(
+        "Catacombs",
+        "Create a 4/1 black Skeleton creature token with menace.",
+    ),
+    THRONE(
+        "Throne of the Dead Three",
+        "Reveal the top ten cards of your library. Put a creature card from among them " +
+            "onto the battlefield with three +1/+1 counters on it. It gains hexproof " +
+            "until your next turn. Then shuffle.",
+    ),
+    ;
+
+    /** Where this room leads. Empty at the throne, which is where the dungeon ends. */
+    val leadsTo: List<UndercityRoom>
+        get() = when (this) {
+            SECRET_ENTRANCE -> listOf(FORGE, LOST_WELL)
+            FORGE -> listOf(TRAP, ARENA)
+            LOST_WELL -> listOf(ARENA, STASH)
+            TRAP -> listOf(ARCHIVES)
+            ARENA -> listOf(ARCHIVES, CATACOMBS)
+            STASH -> listOf(CATACOMBS)
+            ARCHIVES -> listOf(THRONE)
+            CATACOMBS -> listOf(THRONE)
+            THRONE -> emptyList()
+        }
 }
 
 /** How a player's panel is painted, so two people on similar colours still differ. */
@@ -269,6 +331,12 @@ data class PlayerState(
     val commanderDamage: Map<CommanderId, Int> = emptyMap(),
     /** Everything else worth remembering. Absent means zero. */
     val counters: Map<Counter, Int> = emptyMap(),
+    /**
+     * How many times each of this player's own commanders has been cast, keyed by its
+     * index. Tax is charged per commander, not per player: a pair of partners each climb
+     * their own ladder, and one number between them was simply the wrong shape.
+     */
+    val commanderTax: Map<Int, Int> = emptyMap(),
     /** Copied from the profile when the game starts, so it survives a profile edit. */
     val defeatMessage: String? = null,
     val style: PanelStyle = PanelStyle.SOLID,
@@ -279,6 +347,14 @@ data class PlayerState(
      * like. Counters keep climbing underneath it; they are simply not acted on.
      */
     val cannotLose: Boolean = false,
+    /**
+     * Ascend, once ten permanents have been controlled. It never goes away on its own,
+     * and any number of players can hold it at once — which is why it is a flag here
+     * rather than a seat on the game the way the monarchy is.
+     */
+    val citysBlessing: Boolean = false,
+    /** Which room of the Undercity this player has reached, if they have ventured. */
+    val undercityRoom: UndercityRoom? = null,
     val lostTo: LossReason? = null,
 ) {
     val panel: PanelPaint get() = paint ?: PanelPaint.of(colour, style)
@@ -297,6 +373,9 @@ data class PlayerState(
     operator fun get(counter: Counter): Int = counters[counter] ?: 0
 
     /** Only the counters in play, so a panel stays empty until one is actually used. */
+    /** What this player's commander at [index] currently costs on top of its own cost. */
+    fun taxOn(index: Int): Int = commanderTax[index] ?: 0
+
     val activeCounters: List<Pair<Counter, Int>>
         get() = Counter.entries.mapNotNull { c ->
             (counters[c] ?: 0).takeIf { it != 0 }?.let { c to it }
@@ -321,6 +400,8 @@ data class GameState(
      */
     val monarchSeat: Int? = null,
     val initiativeSeat: Int? = null,
+    /** One value for the whole table, unlike the monarchy, which belongs to a seat. */
+    val timeOfDay: TimeOfDay = TimeOfDay.NEITHER,
     /**
      * When the game and the current turn began, in epoch millis.
      *

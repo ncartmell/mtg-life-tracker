@@ -39,10 +39,10 @@ class CountersAndTokensTest {
     @Test
     fun `a counter does not go below zero, and clears itself when it reaches it`() {
         var state = game()
-        state = GameEngine.adjustCounter(state, 0, Counter.COMMANDER_TAX, 2)
-        state = GameEngine.adjustCounter(state, 0, Counter.COMMANDER_TAX, -5)
+        state = GameEngine.adjustCounter(state, 0, Counter.STORM, 2)
+        state = GameEngine.adjustCounter(state, 0, Counter.STORM, -5)
 
-        assertEquals(0, state.player(0)[Counter.COMMANDER_TAX])
+        assertEquals(0, state.player(0)[Counter.STORM])
         assertTrue(
             state.player(0).counters.isEmpty(),
             "a spent counter is dropped, not kept as a zero",

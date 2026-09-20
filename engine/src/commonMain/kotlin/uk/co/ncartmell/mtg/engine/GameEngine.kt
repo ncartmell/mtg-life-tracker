@@ -122,10 +122,15 @@ object GameEngine {
         }
     }
 
-    /** Adds [delta] to one of a player's counters. Never goes below zero. */
+    /**
+     * Adds [delta] to one of a player's counters. Never below zero, never past its cap.
+     *
+     * Most counters have no cap. The Ring stops tempting at four and speed stops at four,
+     * and a held press runs past either in under a second without this.
+     */
     fun adjustCounter(state: GameState, seat: Int, counter: Counter, delta: Int): GameState =
         updatePlayer(state, seat) { player ->
-            val next = (player[counter] + delta).coerceAtLeast(0)
+            val next = (player[counter] + delta).coerceIn(0, counter.max ?: Int.MAX_VALUE)
             player.copy(
                 // Drop it rather than keep a zero, so a panel can show what is in play by
                 // showing whatever is there.
@@ -138,6 +143,24 @@ object GameEngine {
         }
 
     /**
+     * Adds [delta] to the tax on one of a seat's own commanders. Never below zero.
+     *
+     * Two is added per previous cast, but the number people track is the number of casts,
+     * so that is what this counts.
+     */
+    fun adjustCommanderTax(state: GameState, seat: Int, index: Int, delta: Int): GameState =
+        updatePlayer(state, seat) { player ->
+            val next = (player.taxOn(index) + delta).coerceAtLeast(0)
+            player.copy(
+                commanderTax = if (next == 0) {
+                    player.commanderTax - index
+                } else {
+                    player.commanderTax + (index to next)
+                },
+            )
+        }
+
+    /**
      * Hands the monarchy to a seat, or clears it with null.
      *
      * Only one player can hold it, which is the entire rule, so this is a set rather
@@ -145,6 +168,61 @@ object GameEngine {
      */
     fun setMonarch(state: GameState, seat: Int?): GameState =
         state.copy(monarchSeat = seat?.takeIf { !state.player(it).isOut })
+
+    /**
+     * Gives a seat the city's blessing, or takes it away again for a mistake.
+     *
+     * Unlike the monarchy this is not a seat on the game: Ascend is permanent and any
+     * number of players can have it, so it is a flag on each player instead.
+     */
+    fun setCitysBlessing(state: GameState, seat: Int, value: Boolean): GameState =
+        state.copy(
+            players = state.players.map {
+                if (it.seat == seat) it.copy(citysBlessing = value) else it
+            },
+        )
+
+    /** Day, night, or neither. One value for the table. */
+    fun setTimeOfDay(state: GameState, value: TimeOfDay): GameState =
+        state.copy(timeOfDay = value)
+
+    /**
+     * The rooms a seat could venture to next.
+     *
+     * Outside the dungeon that is the Secret Entrance, and at the throne it is the Secret
+     * Entrance again: completing a dungeon removes it, so the next venture is a new run
+     * rather than a dead end.
+     */
+    fun ventureOptions(state: GameState, seat: Int): List<UndercityRoom> {
+        val room = state.player(seat).undercityRoom
+            ?: return listOf(UndercityRoom.SECRET_ENTRANCE)
+        return room.leadsTo.ifEmpty { listOf(UndercityRoom.SECRET_ENTRANCE) }
+    }
+
+    /**
+     * Moves a seat to [room], which must be somewhere they could actually venture.
+     *
+     * Most rooms branch two ways, so which room is next is a decision rather than
+     * something the engine can work out on its own.
+     */
+    fun ventureTo(state: GameState, seat: Int, room: UndercityRoom): GameState {
+        require(room in ventureOptions(state, seat)) {
+            "$room does not follow ${state.player(seat).undercityRoom}"
+        }
+        return state.copy(
+            players = state.players.map {
+                if (it.seat == seat) it.copy(undercityRoom = room) else it
+            },
+        )
+    }
+
+    /** Backs a seat out of the dungeon entirely, for a venture entered by mistake. */
+    fun leaveUndercity(state: GameState, seat: Int): GameState =
+        state.copy(
+            players = state.players.map {
+                if (it.seat == seat) it.copy(undercityRoom = null) else it
+            },
+        )
 
     /** As the monarchy, but for the initiative. */
     fun setInitiative(state: GameState, seat: Int?): GameState =
@@ -176,7 +254,11 @@ object GameEngine {
                         },
                     )
                 } else {
-                    player.copy(commanderCount = count)
+                    player.copy(
+                        commanderCount = count,
+                        // The tax on a commander that no longer exists goes with it.
+                        commanderTax = player.commanderTax.filterKeys { it < count },
+                    )
                 }
             },
         )
