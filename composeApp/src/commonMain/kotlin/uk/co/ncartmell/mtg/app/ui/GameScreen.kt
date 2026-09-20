@@ -255,8 +255,10 @@ private fun PlayerPanel(
     onOpenDetail: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val background = player.colour.composeColor()
-    val ink = background.readableOn()
+    val panel = player.panel
+    val background = panel.baseColor()
+    val runsTo = panel.secondColor()
+    val ink = readableOnBlend(background, runsTo)
     val goesFirst = game.startingSeat == player.seat
     val hasWon = player.seat in (game.outcome?.winningSeats ?: emptyList())
     val shape = RoundedCornerShape(12.dp)
@@ -269,17 +271,23 @@ private fun PlayerPanel(
     val turnInProgress = game.outcome == null &&
         game.turnSeat?.let { !game.player(it).isOut } == true
     val isTheirTurn = turnInProgress && game.turnSeat == player.seat && !player.isOut
-    val cardColour by animateColorAsState(
-        targetValue = when {
-            player.isOut -> background.drained()
-            // Whose turn it is, said with the card rather than a word on it: theirs is
-            // the only panel at full strength, and the table reads that from across the
-            // room without anybody having to find a label.
-            !turnInProgress || isTheirTurn -> background
-            else -> background.resting()
-        },
+    // Whose turn it is, said with the card rather than a word on it: theirs is the only
+    // panel at full strength, and the table reads that from across the room without
+    // anybody having to find a label.
+    val step = { colour: Color ->
+        when {
+            player.isOut -> colour.drained()
+            !turnInProgress || isTheirTurn -> colour
+            else -> colour.resting()
+        }
+    }
+    val cardColour by animateColorAsState(step(background), tween(400), label = "card")
+    // Both ends of a gradient are stepped by the same amount on the same spec, so a
+    // two-colour panel recedes as one thing rather than pulling apart while it animates.
+    val cardRunsTo by animateColorAsState(
+        targetValue = step(runsTo ?: background),
         animationSpec = tween(400),
-        label = "card",
+        label = "cardTo",
     )
 
     val ringWidth by animateDpAsState(
@@ -313,7 +321,11 @@ private fun PlayerPanel(
         colors = CardDefaults.cardColors(containerColor = cardColour),
         elevation = CardDefaults.cardElevation(defaultElevation = grabLift),
     ) {
-        val paint = if (player.isOut) null else player.style.brushFor(cardColour)
+        val paint = if (player.isOut) {
+            null
+        } else {
+            panel.style.brushFor(cardColour, runsTo?.let { cardRunsTo })
+        }
         BoxWithConstraints(
             // Whoever won the roll gets a ring rather than a label: at six players a panel
             // is a third of the screen wide and a label is the first thing to get clipped.
@@ -323,7 +335,14 @@ private fun PlayerPanel(
             // card is cream, so its ink is near-black, and a ring drawn on the card's edge
             // sat against the near-black board and vanished. Every other seat has a light
             // ink, which is why only seat one looked like it was never highlighted.
+            //
+            // Turned first, so that everything below it — the paint especially — is laid
+            // out the way this player reads the panel rather than the way the board does.
             Modifier.fillMaxSize()
+                .facing(facing)
+                // Over the whole card, before the ring is inset off the edge. Painting it
+                // after the inset left a three-pixel rim of the base colour round the
+                // gradient, which read as a border nobody asked for.
                 .then(paint?.let { Modifier.background(it) } ?: Modifier)
                 .padding(RING_INSET)
                 .then(
@@ -332,8 +351,7 @@ private fun PlayerPanel(
                     // width animates, so it grows onto the card rather than appearing.
                     if (ringWidth > 0.dp) Modifier.border(ringWidth, ink, RING_SHAPE)
                     else Modifier,
-                )
-                .facing(facing),
+                ),
         ) {
             // Six players on a phone leaves each panel about a third of the screen, so the
             // life row shrinks to fit rather than running off the edge of the card.
@@ -825,7 +843,6 @@ private fun Modifier.facing(facing: Facing): Modifier = when (facing) {
         .rotate(facing.degrees)
 }
 
-/** The winner's ring, kept clear of the card's edge so it never meets the board behind. */
 /**
  * Wall-clock now, refreshed once a second while anything is reading it.
  *
@@ -856,6 +873,7 @@ private fun elapsed(millis: Long): String {
     return "$hours:$mm:$ss"
 }
 
+/** The winner's ring, kept clear of the card's edge so it never meets the board behind. */
 private val RING_INSET = 3.dp
 private val RING_WIDTH = 3.dp
 private val WIN_RING_WIDTH = 6.dp
@@ -916,31 +934,6 @@ private fun TokenBadge(label: String, ink: Color, tight: Boolean) {
         )
     }
 }
-
-/**
- * How a panel is painted over its base colour.
- *
- * Ten colours run out before ten players do, and two people on neighbouring shades of
- * blue is a real way to misread a board, so a profile can also choose how its panel is
- * shaded. Kept to gradients of the player's own colour rather than images: an image
- * picker is a per-platform lift, and this needs no permissions and no storage.
- */
-private fun PanelStyle.brushFor(base: Color): Brush? = when (this) {
-    PanelStyle.SOLID -> null
-    PanelStyle.FADE -> Brush.verticalGradient(
-        listOf(base.shade(1.18f), base, base.shade(0.82f)),
-    )
-    PanelStyle.CORNER -> Brush.linearGradient(
-        listOf(base.shade(1.22f), base, base.shade(0.86f)),
-    )
-}
-
-private fun Color.shade(factor: Float): Color = Color(
-    red = (red * factor).coerceIn(0f, 1f),
-    green = (green * factor).coerceIn(0f, 1f),
-    blue = (blue * factor).coerceIn(0f, 1f),
-    alpha = alpha,
-)
 
 /**
  * A crossed-out circle, drawn rather than iconed so it needs no icon dependency and no

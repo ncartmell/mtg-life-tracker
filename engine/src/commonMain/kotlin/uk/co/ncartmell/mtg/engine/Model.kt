@@ -33,7 +33,14 @@ data class PlayerProfile(
     /** Shown in place of the usual reason when this player is knocked out. */
     val defeatMessage: String? = null,
     val style: PanelStyle = PanelStyle.SOLID,
+    /**
+     * Null on a profile saved before panels could be painted. Reading it through [panel]
+     * rather than directly is what lets those profiles keep loading untouched.
+     */
+    val paint: PanelPaint? = null,
 ) {
+    val panel: PanelPaint get() = paint ?: PanelPaint.of(colour, style)
+
     val gamesPlayed: Int get() = wins + losses
 
     /** Win rate in the range 0.0..1.0, or null when the player has not finished a game. */
@@ -61,6 +68,33 @@ enum class PanelStyle(val label: String) {
     SOLID("Solid"),
     FADE("Fade"),
     CORNER("Corner"),
+}
+
+/**
+ * How one panel is painted: a colour, optionally a second to run to, and the lay of it.
+ *
+ * The ten named colours are presets rather than the whole range — two people on
+ * neighbouring shades of blue is a real way to misread a board, and with six at a table
+ * ten names run out of ways to be told apart. [argb] is therefore any colour, and the
+ * enum survives only as the quick picks and as what older saved profiles hold.
+ *
+ * [secondArgb] is what makes FADE and CORNER a gradient between two colours rather than
+ * one colour shaded lighter and darker. Left null they still shade, which is what every
+ * profile saved before this existed will do.
+ */
+@Serializable
+data class PanelPaint(
+    val argb: Int,
+    val secondArgb: Int? = null,
+    val style: PanelStyle = PanelStyle.SOLID,
+) {
+    /** The second colour only means anything on a style that runs between two. */
+    val gradientTo: Int? get() = secondArgb?.takeIf { style != PanelStyle.SOLID }
+
+    companion object {
+        fun of(colour: PlayerColour, style: PanelStyle = PanelStyle.SOLID) =
+            PanelPaint(argb = colour.argb.toInt(), style = style)
+    }
 }
 
 /** Identifies one of a player's commanders — a seat may have two. */
@@ -238,6 +272,8 @@ data class PlayerState(
     /** Copied from the profile when the game starts, so it survives a profile edit. */
     val defeatMessage: String? = null,
     val style: PanelStyle = PanelStyle.SOLID,
+    /** Also copied at the start, so repainting a profile mid-game changes nothing. */
+    val paint: PanelPaint? = null,
     /**
      * Set while an effect says this player cannot lose the game — Platinum Angel and the
      * like. Counters keep climbing underneath it; they are simply not acted on.
@@ -245,6 +281,8 @@ data class PlayerState(
     val cannotLose: Boolean = false,
     val lostTo: LossReason? = null,
 ) {
+    val panel: PanelPaint get() = paint ?: PanelPaint.of(colour, style)
+
     init {
         require(commanderCount in 1..2) { "A player has one or two commanders, got $commanderCount" }
     }

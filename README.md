@@ -102,8 +102,10 @@ signature, which the sideloading tools above add using your own Apple ID.
 
 **Personalising**
 
-- A profile picks its own colour, how its panel is shaded, and what that panel says when
-  the player is knocked out
+- Every seat paints its own panel, guests included: any colour, mixed on RGB sliders or
+  taken from the ten presets, laid on solid or run as a gradient into a second colour.
+  A seat filled by a profile saves its panel for next time; a guest keeps it for the game
+- A profile also sets what its panel says when that player is knocked out
 - The last game's format, size and rules are offered again next time, so a regular group
   starts a game in one tap
 

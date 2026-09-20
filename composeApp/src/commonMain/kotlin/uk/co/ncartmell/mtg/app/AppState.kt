@@ -13,7 +13,7 @@ import uk.co.ncartmell.mtg.app.store.createStorage
 import uk.co.ncartmell.mtg.app.store.nowMillis
 import uk.co.ncartmell.mtg.engine.Counter
 import uk.co.ncartmell.mtg.engine.DiceThrow
-import uk.co.ncartmell.mtg.engine.PanelStyle
+import uk.co.ncartmell.mtg.engine.PanelPaint
 import uk.co.ncartmell.mtg.engine.PlanarFace
 import uk.co.ncartmell.mtg.engine.GameHistory
 import uk.co.ncartmell.mtg.engine.CommanderId
@@ -93,11 +93,15 @@ class AppState(
         )
     }
 
-    fun setPanelStyle(id: String, style: PanelStyle) = mutateBook { book ->
-        book.copy(profiles = book.profiles.map { if (it.id == id) it.copy(style = style) else it })
+    /**
+     * Saves a painted panel against a profile, so a regular is the same colour next week.
+     *
+     * A seat filled by a guest has nowhere to save to, which is why the setup screen keeps
+     * the paint per seat as well and only writes through when there is a profile behind it.
+     */
+    fun setProfilePaint(id: String, paint: PanelPaint) = mutateBook { book ->
+        book.copy(profiles = book.profiles.map { if (it.id == id) it.copy(paint = paint) else it })
     }
-
-    fun setProfileColour(id: String, colour: PlayerColour) = mutateBook { it.setColour(id, colour) }
 
     fun renameProfile(id: String, name: String) = mutateBook { it.rename(id, name) }
 

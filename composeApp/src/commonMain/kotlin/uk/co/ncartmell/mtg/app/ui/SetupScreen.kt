@@ -13,15 +13,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,12 +40,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.Screen
 import uk.co.ncartmell.mtg.app.store.SetupMemory
 import uk.co.ncartmell.mtg.engine.Format
 import uk.co.ncartmell.mtg.engine.GameSettings
+import uk.co.ncartmell.mtg.engine.PanelPaint
 import uk.co.ncartmell.mtg.engine.PanelStyle
 import uk.co.ncartmell.mtg.engine.PlayerColour
 import uk.co.ncartmell.mtg.engine.SeatSetup
@@ -59,6 +66,16 @@ fun SetupScreen(state: AppState) {
     // Seat assignments, indexed by seat. Null profile means a guest.
     val seatProfiles = remember { mutableStateListOfNulls(GameSettings.MAX_PLAYERS) }
     val seatCommanders = remember { mutableStateListOfOnes(GameSettings.MAX_PLAYERS) }
+    // Paint lives on the seat, not only on a profile. Personalising a profile used to be
+    // the only way to change a panel, and it reached the board only if that profile had
+    // also been put in a seat — so on a table of guests, which is the ordinary case,
+    // nothing anybody chose ever showed up.
+    val seatPaints = remember { mutableStateListOfPaints(GameSettings.MAX_PLAYERS) }
+
+    fun paintFor(seat: Int): PanelPaint =
+        seatPaints[seat]
+            ?: seatProfiles[seat]?.let { state.book[it] }?.panel
+            ?: PanelPaint.of(PlayerColour.entries[seat])
 
     val start = {
         val settings = GameSettings(
@@ -79,6 +96,7 @@ fun SetupScreen(state: AppState) {
                 commanderCount = if (commanderDamage) seatCommanders[seat] else 1,
                 defeatMessage = profile?.defeatMessage,
                 style = profile?.style ?: PanelStyle.SOLID,
+                paint = paintFor(seat),
             )
         }
         state.rememberSetup(
@@ -183,6 +201,12 @@ fun SetupScreen(state: AppState) {
                 seat = seat,
                 seatLabel = format.seatLabel(seat),
                 selectedProfileId = seatProfiles[seat],
+                paint = paintFor(seat),
+                onPaint = { painted ->
+                    seatPaints[seat] = painted
+                    // A guest has nowhere to save to; a profile keeps it for next time.
+                    seatProfiles[seat]?.let { state.setProfilePaint(it, painted) }
+                },
                 takenProfileIds = seatProfiles.take(playerCount).filterNotNull().toSet(),
                 commanderCount = seatCommanders[seat],
                 commanderDamageEnabled = commanderDamage,
@@ -218,6 +242,8 @@ private fun SeatCard(
     seat: Int,
     seatLabel: String,
     selectedProfileId: String?,
+    paint: PanelPaint,
+    onPaint: (PanelPaint) -> Unit,
     takenProfileIds: Set<String>,
     commanderCount: Int,
     commanderDamageEnabled: Boolean,
@@ -226,18 +252,23 @@ private fun SeatCard(
 ) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            var painting by remember { mutableStateOf(false) }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(12.dp).clip(CircleShape).background(
-                        selectedProfileId?.let { state.book[it]?.colour }
-                            ?.composeColor()
-                            ?: PlayerColour.entries[seat].composeColor(),
-                    ),
-                )
+                PanelSwatch(paint, Modifier.size(width = 34.dp, height = 20.dp))
                 Text(
                     seatLabel,
-                    Modifier.padding(start = 8.dp),
+                    Modifier.padding(start = 8.dp).weight(1f),
                     fontWeight = FontWeight.SemiBold,
+                )
+                TextButton(onClick = { painting = true }) { Text("Panel") }
+            }
+
+            if (painting) {
+                PanelPaintDialog(
+                    initial = paint,
+                    onDismiss = { painting = false },
+                    onApply = { onPaint(it); painting = false },
                 )
             }
 
@@ -294,13 +325,22 @@ private fun ProfileTrimmings(state: AppState) {
                 }
             }
 
-            Text("Panel", style = MaterialTheme.typography.labelMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PanelStyle.entries.forEach { style ->
-                    Chip(style.label, selected = profile.style == style) {
-                        state.setPanelStyle(profile.id, style)
-                    }
-                }
+            var painting by remember { mutableStateOf(false) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PanelSwatch(profile.panel, Modifier.size(width = 40.dp, height = 24.dp))
+                Text(
+                    "Panel",
+                    Modifier.padding(start = 8.dp).weight(1f),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                TextButton(onClick = { painting = true }) { Text("Change") }
+            }
+            if (painting) {
+                PanelPaintDialog(
+                    initial = profile.panel,
+                    onDismiss = { painting = false },
+                    onApply = { state.setProfilePaint(profile.id, it); painting = false },
+                )
             }
 
             OutlinedTextField(
@@ -422,6 +462,138 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
 
 private fun Modifier.alphaIf(dim: Boolean): Modifier =
     if (dim) this.then(Modifier.background(Color(0x33000000), CircleShape)) else this
+
+/** A panel drawn exactly as the board will draw it, so the preview cannot drift. */
+@Composable
+private fun PanelSwatch(paint: PanelPaint, modifier: Modifier = Modifier) {
+    val base = paint.baseColor()
+    val to = paint.secondColor()
+    Box(
+        modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(base)
+            .then(paint.style.brushFor(base, to)?.let { Modifier.background(it) } ?: Modifier),
+    )
+}
+
+/**
+ * Picks a panel: how it is laid on, and the one or two colours it is laid on in.
+ *
+ * Ten named colours were never enough for six people who all want blue, so the colour is
+ * mixed rather than chosen from a list. The presets stay as the quick way in, because at
+ * a table nobody wants to mix a colour from nothing.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PanelPaintDialog(
+    initial: PanelPaint,
+    onDismiss: () -> Unit,
+    onApply: (PanelPaint) -> Unit,
+) {
+    var style by remember { mutableStateOf(initial.style) }
+    var first by remember { mutableStateOf(initial.argb) }
+    var second by remember {
+        mutableStateOf(initial.secondArgb ?: initial.argb.shifted())
+    }
+    var editingSecond by remember { mutableStateOf(false) }
+
+    val gradient = style != PanelStyle.SOLID
+    val editing = if (gradient && editingSecond) second else first
+    val preview = PanelPaint(first, second.takeIf { gradient }, style)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { onApply(preview) }) { Text("Apply") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        title = { Text("Panel") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                PanelSwatch(preview, Modifier.fillMaxWidth().height(64.dp))
+
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PanelStyle.entries.forEach {
+                        Chip(it.label, selected = style == it) {
+                            style = it
+                            if (it == PanelStyle.SOLID) editingSecond = false
+                        }
+                    }
+                }
+
+                // Only worth asking which colour is being mixed when there are two.
+                if (gradient) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Chip("From", selected = !editingSecond) { editingSecond = false }
+                        Chip("To", selected = editingSecond) { editingSecond = true }
+                    }
+                }
+
+                Text(editing.hex6(), style = MaterialTheme.typography.labelMedium)
+
+                val set = { value: Int ->
+                    if (gradient && editingSecond) second = value else first = value
+                }
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PlayerColour.entries.forEach { preset ->
+                        val argb = preset.argb.toInt()
+                        Box(
+                            Modifier.size(24.dp)
+                                .clip(CircleShape)
+                                .background(preset.composeColor())
+                                .clickable { set(argb) },
+                        )
+                    }
+                }
+
+                listOf("R" to 16, "G" to 8, "B" to 0).forEach { (label, shift) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, Modifier.width(18.dp), style = MaterialTheme.typography.labelMedium)
+                        Slider(
+                            value = editing.channel(shift).toFloat(),
+                            onValueChange = { set(editing.withChannel(shift, it.toInt())) },
+                            valueRange = 0f..255f,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            editing.channel(shift).toString(),
+                            Modifier.width(32.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            textAlign = TextAlign.End,
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
+private fun Int.channel(shift: Int): Int = (this shr shift) and 0xFF
+
+private fun Int.withChannel(shift: Int, value: Int): Int =
+    (this and (0xFF shl shift).inv()) or ((value.coerceIn(0, 255)) shl shift) or OPAQUE_BITS
+
+/** A starting point for a second colour that is visibly not the first. */
+private fun Int.shifted(): Int = listOf(16, 8, 0).fold(this) { acc, shift ->
+    acc.withChannel(shift, (acc.channel(shift) * 0.45f).toInt() + 28)
+}
+
+private fun Int.hex6(): String {
+    val digits = (this and 0xFFFFFF).toString(16).uppercase()
+    return "#" + "0".repeat(6 - digits.length) + digits
+}
+
+private const val OPAQUE_BITS = 0xFF shl 24
+
+private fun mutableStateListOfPaints(size: Int) =
+    androidx.compose.runtime.mutableStateListOf<PanelPaint?>().apply { repeat(size) { add(null) } }
 
 private fun mutableStateListOfNulls(size: Int) =
     androidx.compose.runtime.mutableStateListOf<String?>().apply { repeat(size) { add(null) } }

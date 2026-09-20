@@ -40,6 +40,7 @@ object GameEngine {
                     commanderCount = seat.commanderCount,
                     defeatMessage = seat.defeatMessage,
                     style = seat.style,
+                    paint = seat.paint,
                 )
             },
         )
@@ -431,4 +432,5 @@ data class SeatSetup(
     val commanderCount: Int = 1,
     val defeatMessage: String? = null,
     val style: PanelStyle = PanelStyle.SOLID,
+    val paint: PanelPaint? = null,
 )

@@ -1,7 +1,10 @@
 package uk.co.ncartmell.mtg.app.ui
 
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import uk.co.ncartmell.mtg.engine.Format
+import uk.co.ncartmell.mtg.engine.PanelPaint
+import uk.co.ncartmell.mtg.engine.PanelStyle
 import uk.co.ncartmell.mtg.engine.PlayerColour
 
 /**
@@ -129,6 +132,14 @@ private fun standardLayout(playerCount: Int): List<BoardRow> = when (playerCount
 
 fun PlayerColour.composeColor(): Color = Color(argb.toULong().toLong() or 0xFF000000L)
 
+/** A panel's first colour, forced opaque — a see-through panel would show the board. */
+fun PanelPaint.baseColor(): Color = Color(argb or OPAQUE)
+
+/** The colour the panel runs to, or null when it is one colour. */
+fun PanelPaint.secondColor(): Color? = gradientTo?.let { Color(it or OPAQUE) }
+
+private const val OPAQUE = 0xFF000000.toInt()
+
 /**
  * Text colour that stays readable on a given player colour.
  *
@@ -138,6 +149,22 @@ fun PlayerColour.composeColor(): Color = Color(argb.toULong().toLong() or 0xFF00
 fun Color.readableOn(): Color {
     val luminance = 0.299 * red + 0.587 * green + 0.114 * blue
     return if (luminance > 0.55) Color(0xFF16181D) else Color(0xFFF6F6F4)
+}
+
+/**
+ * Text colour for a panel that runs between two colours.
+ *
+ * Judged on the midpoint rather than on either end, because the total sits across the
+ * middle of the panel. Picking on the first colour alone puts near-black text over a
+ * panel that fades to near-black by the time it reaches the bottom.
+ */
+fun readableOnBlend(first: Color, second: Color?): Color {
+    if (second == null) return first.readableOn()
+    return Color(
+        red = (first.red + second.red) / 2f,
+        green = (first.green + second.green) / 2f,
+        blue = (first.blue + second.blue) / 2f,
+    ).readableOn()
 }
 
 /**
@@ -165,3 +192,31 @@ fun clockwiseOrder(rows: List<BoardRow>): List<Int> {
     }
     return top + downTheRight + bottom + upTheLeft
 }
+
+/**
+ * How a panel is painted over its base colour.
+ *
+ * Ten colours run out before ten players do, and two people on neighbouring shades of
+ * blue is a real way to misread a board, so a profile can also choose how its panel is
+ * shaded. Kept to gradients of the player's own colour rather than images: an image
+ * picker is a per-platform lift, and this needs no permissions and no storage.
+ */
+fun PanelStyle.brushFor(base: Color, to: Color?): Brush? = when (this) {
+    PanelStyle.SOLID -> null
+    // With a second colour the panel runs between the two. Without one it runs between
+    // shades of its own, which is what every panel painted before this did and what a
+    // profile that has never been repainted still does.
+    PanelStyle.FADE -> Brush.verticalGradient(
+        to?.let { listOf(base, it) } ?: listOf(base.shade(1.18f), base, base.shade(0.82f)),
+    )
+    PanelStyle.CORNER -> Brush.linearGradient(
+        to?.let { listOf(base, it) } ?: listOf(base.shade(1.22f), base, base.shade(0.86f)),
+    )
+}
+
+fun Color.shade(factor: Float): Color = Color(
+    red = (red * factor).coerceIn(0f, 1f),
+    green = (green * factor).coerceIn(0f, 1f),
+    blue = (blue * factor).coerceIn(0f, 1f),
+    alpha = alpha,
+)
