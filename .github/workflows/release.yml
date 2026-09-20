@@ -41,8 +41,16 @@ jobs:
             os: macos-14
             task: packageReleaseDmg
             glob: composeApp/build/compose/binaries/main-release/dmg/*.dmg
+          # Intel, and on a clock. macos-13 was retired in December 2025, which is why
+          # this job sat queued forever and every release since 1.6.0 went out without an
+          # Intel dmg — a job that never starts also leaves the whole run showing as in
+          # progress, so a genuinely stuck release looks no different from a healthy one.
+          # macos-15-intel is the replacement and GitHub drops x86_64 macOS altogether
+          # when it retires in autumn 2027, so this buys time rather than fixing it for
+          # good. An Apple Silicon build is no substitute: Rosetta translates x86 to ARM,
+          # not the other way, so an Intel Mac cannot run the arm64 dmg at all.
           - name: macos-x64
-            os: macos-13
+            os: macos-15-intel
             task: packageReleaseDmg
             glob: composeApp/build/compose/binaries/main-release/dmg/*.dmg
 
