@@ -358,18 +358,28 @@ object GameEngine {
             val best = round.values.max()
             val winners = round.filterValues { it == best }.keys
             if (winners.size == 1) {
-                val winner = winners.first()
-                return state.copy(
-                    startingSeat = winner,
-                    lastRoll = DiceRoll(rounds.toList(), winner),
-                    turnSeat = winner,
-                    turnCount = 1,
-                    turnStartedAt = at,
-                )
+                return applyRoll(state, DiceRoll(rounds.toList(), winners.first()), at)
             }
             contenders = winners.toList()
         }
     }
+
+    /**
+     * Writes a finished roll onto the game: who starts, and the numbers behind it.
+     *
+     * Split out from [rollForFirstPlayer] so that a roll made with a real die — which
+     * arrives a number at a time and is assembled by [RollOff] — lands in exactly the same
+     * place as one the app rolled for itself. A game should have one way of acquiring a
+     * starting seat, not one per kind of die.
+     */
+    fun applyRoll(state: GameState, roll: DiceRoll, at: Long? = null): GameState =
+        state.copy(
+            startingSeat = roll.winningSeat,
+            lastRoll = roll,
+            turnSeat = roll.winningSeat,
+            turnCount = 1,
+            turnStartedAt = at,
+        )
 
     /** Rolls dice for their own sake — a coin is two sides. */
     fun rollDice(sides: Int, count: Int = 1, random: Random = Random): DiceThrow {

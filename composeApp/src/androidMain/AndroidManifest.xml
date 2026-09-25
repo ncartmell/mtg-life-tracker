@@ -1,5 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Optional throughout. A Pixels die is a nice thing to have on the table and nothing
+      more, so Bluetooth LE is declared as a feature the app can do without: a device
+      lacking it installs and runs, simply without ever offering a die.
+
+      Android 12 replaced "scanning is a location capability" with permissions that say
+      what they mean, hence the split. neverForLocation is the honest declaration here —
+      the app looks for a die and has no interest whatever in where anybody is.
+    -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <!-- Both of these are implied by the permissions above, and implied means required
+         unless said otherwise. A tablet with no radio at all should still install. -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+
     <application
         android:label="MTG Life Tracker"
         android:icon="@mipmap/ic_launcher"

@@ -83,6 +83,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import uk.co.ncartmell.mtg.app.AppState
 import uk.co.ncartmell.mtg.app.KeepScreenAwake
+import uk.co.ncartmell.mtg.app.pixels.PixelsDieType
+import uk.co.ncartmell.mtg.app.pixels.PixelsStatus
 import uk.co.ncartmell.mtg.app.store.nowMillis
 import uk.co.ncartmell.mtg.app.Screen
 import uk.co.ncartmell.mtg.engine.CommanderId
@@ -95,6 +97,7 @@ import uk.co.ncartmell.mtg.engine.GameOutcome
 import uk.co.ncartmell.mtg.engine.GameState
 import uk.co.ncartmell.mtg.engine.LossReason
 import uk.co.ncartmell.mtg.engine.PlayerState
+import uk.co.ncartmell.mtg.engine.RollOff
 
 @Composable
 fun GameScreen(state: AppState) {
@@ -698,12 +701,30 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text("Who goes first", fontWeight = FontWeight.SemiBold)
-                Button(
-                    onClick = state::rollForFirstPlayer,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (game.lastRoll == null) "Roll for first player" else "Roll again") }
 
-                game.lastRoll?.let { roll ->
+                // While a real die is going round, the buttons stand aside: half a
+                // roll-off and a "roll it for me" button next to each other is an
+                // invitation to decide the same thing twice.
+                val rollOff = state.rollOff
+                if (rollOff != null) {
+                    RollOffProgress(game, rollOff, onCancel = state::cancelRollOff)
+                } else {
+                    Button(
+                        onClick = state::rollForFirstPlayer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(if (game.lastRoll == null) "Roll for first player" else "Roll again") }
+
+                    // A second way to do the same thing, offered only when there is
+                    // actually a die on the table to do it with.
+                    if (state.pixels.isConnected) {
+                        OutlinedButton(
+                            onClick = state::startRollOff,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Pass the die round instead") }
+                    }
+                }
+
+                game.lastRoll?.takeIf { rollOff == null }?.let { roll ->
                     Text(
                         "${game.player(roll.winningSeat).name} goes first, " +
                             "with ${roll.winningRoll}",
@@ -816,10 +837,149 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                         )
                     }
                 }
+
+                PixelsPanel(state)
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+/**
+ * The roll-off as it goes round the table.
+ *
+ * Whose turn it is to roll is the only thing that matters here, so it is the one thing set
+ * in the player's own colour and full size — the die is flashing that colour at the same
+ * time, and the two together are what tell somebody across the table that it is them.
+ */
+@Composable
+private fun RollOffProgress(game: GameState, rollOff: RollOff, onCancel: () -> Unit) {
+    rollOff.awaiting?.let { seat ->
+        val player = game.player(seat)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(Modifier.size(14.dp).clip(CircleShape).background(player.panel.baseColor()))
+            Text(
+                "Pass the die to ${player.name}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Text(
+            buildString {
+                if (rollOff.tieBreakNumber > 0) append("Tie-break ${rollOff.tieBreakNumber} — ")
+                append("${rollOff.rolledThisRound} of ${rollOff.contenders.size} rolled")
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    rollOff.current.entries.sortedByDescending { it.value }.forEach { (seat, value) ->
+        RollRow(
+            colour = game.player(seat).panel.baseColor(),
+            name = game.player(seat).name,
+            value = value,
+            won = false,
+        )
+    }
+
+    TextButton(onClick = onCancel) { Text("Cancel") }
+}
+
+/**
+ * The physical die: finding one, and what it is doing.
+ *
+ * Absent entirely where the platform has no Bluetooth, rather than shown and disabled —
+ * there is nothing a desktop player could do about it. Everything else in this dialog
+ * works exactly as it did before any of this existed, with or without a die.
+ */
+@Composable
+private fun PixelsPanel(state: AppState) {
+    val pixels = state.pixels
+    if (!pixels.supported) return
+
+    Box(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            .size(width = 1.dp, height = 1.dp)
+            .background(MaterialTheme.colorScheme.outline),
+    )
+    Text("Pixels die", fontWeight = FontWeight.SemiBold)
+
+    /** A die found by a scan, offered as something to connect to. */
+    @Composable
+    fun found() = pixels.found.forEach { device ->
+        OutlinedButton(
+            onClick = { pixels.connect(device) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(device.name) }
+    }
+
+    @Composable
+    fun note(text: String, colour: Color = MaterialTheme.colorScheme.onSurfaceVariant) =
+        Text(text, style = MaterialTheme.typography.labelMedium, color = colour)
+
+    when (val status = pixels.status) {
+        is PixelsStatus.Connected -> {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    buildString {
+                        append(status.name)
+                        if (status.dieType != PixelsDieType.UNKNOWN) {
+                            append(" · ${status.dieType.label}")
+                        }
+                        status.batteryPercent?.let { append(" · $it%") }
+                    },
+                    Modifier.weight(1f),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                TextButton(onClick = pixels::disconnect) { Text("Disconnect") }
+            }
+            note("Roll it and the number lands here, as a d${pixels.dieFaces}.")
+        }
+
+        is PixelsStatus.Connecting -> note("Connecting to ${status.name}…")
+
+        PixelsStatus.Scanning -> {
+            note("Looking for dice — give one a shake to wake it up.")
+            found()
+            TextButton(onClick = pixels::stopScan) { Text("Stop looking") }
+        }
+
+        is PixelsStatus.Unavailable -> {
+            note(status.reason)
+            OutlinedButton(
+                onClick = pixels::scan,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Try again") }
+        }
+
+        is PixelsStatus.Failed -> {
+            note(status.reason, MaterialTheme.colorScheme.error)
+            OutlinedButton(
+                onClick = pixels::scan,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Look again") }
+        }
+
+        PixelsStatus.Idle -> {
+            found()
+            OutlinedButton(
+                onClick = pixels::scan,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Look for a die") }
+        }
+
+        // Never reached: the whole panel is skipped when dice are unsupported.
+        PixelsStatus.Unsupported -> Unit
+    }
 }
 
 @Composable

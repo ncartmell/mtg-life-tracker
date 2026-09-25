@@ -10,6 +10,7 @@ import uk.co.ncartmell.mtg.app.store.ProfileRepository
 import uk.co.ncartmell.mtg.app.store.SetupMemory
 import uk.co.ncartmell.mtg.app.store.SetupRepository
 import uk.co.ncartmell.mtg.app.store.GameRepository
+import uk.co.ncartmell.mtg.app.pixels.PixelsController
 import uk.co.ncartmell.mtg.app.store.createStorage
 import uk.co.ncartmell.mtg.app.store.nowMillis
 import uk.co.ncartmell.mtg.engine.Counter
@@ -27,6 +28,7 @@ import uk.co.ncartmell.mtg.engine.SavedGame
 import uk.co.ncartmell.mtg.engine.TimeOfDay
 import uk.co.ncartmell.mtg.engine.UndercityRoom
 import uk.co.ncartmell.mtg.engine.ProfileBook
+import uk.co.ncartmell.mtg.engine.RollOff
 import uk.co.ncartmell.mtg.engine.SeatSetup
 import kotlin.random.Random
 
@@ -46,6 +48,14 @@ class AppState(
     private val inProgress: GameRepository = GameRepository(createStorage()),
     private val random: Random = Random,
     private val clock: () -> Long = ::nowMillis,
+    /**
+     * The physical die, where there is one.
+     *
+     * Entirely optional. Where Bluetooth is missing, switched off, refused or simply not
+     * used, this reports itself unsupported or unconnected and every screen behaves as it
+     * did before any of it existed — the app's own dice are untouched.
+     */
+    val pixels: PixelsController = PixelsController(clock = clock),
 ) {
     /** Whatever was on the table when the app last stopped. Read once, before anything. */
     private val resumed = inProgress.load()
@@ -168,6 +178,7 @@ class AppState(
         )
         resultRecorded = false
         lastThrow = null
+        rollOff = null
         screen = Screen.Game
         past = emptyList()
         lastKind = null
@@ -205,6 +216,7 @@ class AppState(
         resultRecorded = false
         lastThrow = null
         lastPlanarFace = null
+        rollOff = null
         game = GameEngine.restart(current, startedAt = clock())
         persist()
     }
@@ -250,6 +262,77 @@ class AppState(
         lastPlanarFace = null
     }
 
+    // --- the physical die --------------------------------------------------------------
+
+    /**
+     * A roll for first player being made with a real die, if one is under way.
+     *
+     * Deliberately not part of [GameState] and deliberately not saved: it is something the
+     * table is doing this minute, not part of the game. An app killed halfway round the
+     * table starts the roll-off again, which costs seconds, rather than restoring half of
+     * one and leaving somebody unsure whether they have already rolled.
+     */
+    var rollOff by mutableStateOf<RollOff?>(null)
+        private set
+
+    init {
+        pixels.onFace = ::recordDieFace
+        // A die that wanders off mid-roll-off would otherwise leave the table waiting on a
+        // number that can no longer arrive.
+        pixels.onConnectionLost = { rollOff = null }
+    }
+
+    /**
+     * Starts passing the die round to decide who goes first.
+     *
+     * Only ever reached with a die connected — the UI does not offer it otherwise — and
+     * it refuses anyway, because a roll-off nobody can roll for would simply hang.
+     */
+    fun startRollOff() {
+        val current = game ?: return
+        if (!pixels.isConnected) return
+        rollOff = RollOff.start(current)
+        nudgeDie()
+    }
+
+    fun cancelRollOff() {
+        rollOff = null
+    }
+
+    /**
+     * A face reported by the physical die.
+     *
+     * Outside a roll-off the die is just a d20: the same throw the roll dialog's own button
+     * makes, arrived at by shaking something rather than tapping. Inside one, the number
+     * belongs to whichever seat is being waited on.
+     */
+    private fun recordDieFace(face: Int) {
+        val current = rollOff
+        if (current == null) {
+            lastThrow = DiceThrow(sides = pixels.dieFaces, values = listOf(face))
+            return
+        }
+        val next = current.record(face)
+        rollOff = next
+        val settled = next.result ?: run {
+            nudgeDie()
+            return
+        }
+        updateGame { GameEngine.applyRoll(it, settled, at = clock()) }
+        // Three long flashes in the winner's colour, which is how the table finds out.
+        blink(settled.winningSeat, count = 3, durationMs = 1400)
+    }
+
+    /** Lights the die in the colour of whoever it is waiting on, so the table can see. */
+    private fun nudgeDie() {
+        blink(rollOff?.awaiting ?: return, count = 1, durationMs = 900)
+    }
+
+    private fun blink(seat: Int, count: Int, durationMs: Int) {
+        val paint = game?.player(seat)?.panel ?: return
+        pixels.blink(paint.argb, count, durationMs)
+    }
+
     fun adjustLife(seat: Int, delta: Int) =
         updateGame("life:$seat") { GameEngine.adjustLife(it, seat, delta) }
 
@@ -275,6 +358,7 @@ class AppState(
 
     fun leaveGame() {
         game = null
+        rollOff = null
         screen = Screen.Setup
         past = emptyList()
         lastKind = null

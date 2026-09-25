@@ -94,6 +94,23 @@ signature, which the sideloading tools above add using your own Apple ID.
   competing with their name for the width
 - A roll screen: the whole table's roll for first player laid out in order, tie-breaks
   shown as the separate rounds they were, and ordinary dice from d4 to d20 plus a coin
+- A [Pixels](https://gamewithpixels.com) die, for anyone who has one. The app finds it
+  over Bluetooth and takes its rolls, and none of it appears unless a die is actually
+  connected — the app's own dice are untouched and still do everything they did.
+  - Loose rolls land where a tapped d20 already landed, thrown by shaking something
+    rather than pressing a button
+  - Whatever die is connected is the die you get: the app asks it what it is when it
+    connects and reads its rolls accordingly, so a d6 is reported as a d6 and a
+    percentile die reads the tens printed on it rather than counting from one. A d20 is
+    the fallback when a die is on firmware too old to say
+  - For who goes first, the die is passed round the board in the order people are really
+    sitting in — on a two-by-two board that is 0, 1, 3, 2, not seat order — and it lights
+    up in the colour of whoever it is waiting on, so the table can see whose turn it is
+    to roll from across the room. A tie sends it round again between the players who
+    tied, and the winner's colour flashes when it settles
+  - One throw reported twice as the die comes to rest is still one throw, which matters
+    when the next number belongs to somebody else
+  - Android and iOS only. The desktop builds have no Bluetooth and never mention dice
 - Every finished game kept — seats, who won, how long — under the leaderboard, so the
   running totals can be traced back to the games behind them
 - The screen is held awake while a game is on
@@ -146,6 +163,13 @@ The split is the point. Every rule — elimination thresholds, whether commander
 reduces life, what counts as a win — lives in `:engine`, which has no Compose dependency
 and whose tests run on any JDK with no emulator, simulator or Android SDK in sight.
 `AppState` in the app module contains no logic beyond wiring.
+
+The Pixels die follows the same idea. How a roll-off is decided is a rule, so it is
+`RollOff` in `:engine`, tested there; the [protocol](https://github.com/GameWithPixels)
+is byte-shuffling with no platform API in it, so it is `PixelsProtocol` in common code,
+tested without a die; and what is left for each platform is a short `PixelsLink` that
+only carries bytes — `android.bluetooth` on one side, CoreBluetooth on the other, and a
+stub on desktop that reports the whole feature unsupported.
 
 ## Running it
 
@@ -209,3 +233,10 @@ start mid-game is worse.
 - Nothing is synced or shared between devices; each install keeps its own profiles,
   leaderboard and game history
 - The iOS build is unsigned, so it needs re-signing before it will install
+- The desktop builds cannot talk to a Pixels die. There is no Bluetooth in the Java
+  standard library, and reaching one would mean a separate native bridge for each of
+  Windows, macOS and Linux — three ways to fail, for the build least likely to be sitting
+  on a table with a die next to it
+- Only one die at a time, and it is not remembered between launches: finding it again is
+  two taps, and a die that reconnected on its own would start reporting rolls from
+  whichever bag it was in

@@ -15,6 +15,10 @@
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>CADisableMinimumFrameDurationOnPhone</key><true/>
     <key>LSRequiresIPhoneOS</key><true/>
+    <!-- Shown when somebody first goes looking for a Pixels die. The app builds no
+         CBCentralManager until then, so this prompt never appears merely on launch. -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Connect to a Pixels dice to roll for first player and throw a d20.</string>
     <!-- An empty dict here is what gave a white page on launch: iOS falls back to a
          plain white screen, which on a dark app reads as a flash of nothing. Android has
          had the same ink background and the same mark since its splash went in. -->
