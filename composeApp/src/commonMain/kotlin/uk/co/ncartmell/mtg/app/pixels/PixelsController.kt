@@ -141,11 +141,14 @@ class PixelsController(
     }
 
     /**
-     * Blinks the die in a panel's colour, which arrives as `0xAARRGGBB` and goes out as
-     * `0xRRGGBB` — the die has no use for an alpha channel.
+     * Blinks the die in a panel's colour, brightened for a lamp rather than a screen.
+     *
+     * The alpha channel goes nowhere — the die has no use for one — and the rest is scaled
+     * by [PixelsProtocol.ledColour], because the board's palette is dimmer than an LED
+     * wants and unevenly so.
      */
     fun blink(argb: Int, count: Int = 1, durationMs: Int = 700) {
-        if (isConnected) link.blink(argb and 0xFFFFFF, count, durationMs)
+        if (isConnected) link.blink(PixelsProtocol.ledColour(argb), count, durationMs)
     }
 
     /**

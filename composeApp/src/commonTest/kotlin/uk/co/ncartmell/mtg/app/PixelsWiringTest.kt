@@ -5,6 +5,7 @@ import uk.co.ncartmell.mtg.app.pixels.PixelsDevice
 import uk.co.ncartmell.mtg.app.pixels.PixelsDieType
 import uk.co.ncartmell.mtg.app.pixels.PixelsLink
 import uk.co.ncartmell.mtg.app.pixels.PixelsListener
+import uk.co.ncartmell.mtg.app.pixels.PixelsProtocol
 import uk.co.ncartmell.mtg.app.pixels.PixelsStatus
 import uk.co.ncartmell.mtg.app.store.DieRepository
 import uk.co.ncartmell.mtg.app.store.GameRepository
@@ -251,13 +252,13 @@ class PixelsWiringTest {
 
         state.startRollOff()
         assertEquals(
-            state.game!!.player(0).panel.argb and 0xFFFFFF,
+            PixelsProtocol.ledColour(state.game!!.player(0).panel.argb),
             link.blinks.single().first,
             "seat zero is up first",
         )
 
         roll(link, 9)
-        assertEquals(state.game!!.player(1).panel.argb and 0xFFFFFF, link.blinks.last().first)
+        assertEquals(PixelsProtocol.ledColour(state.game!!.player(1).panel.argb), link.blinks.last().first)
     }
 
     @Test
@@ -271,7 +272,7 @@ class PixelsWiringTest {
         roll(link, 17)
 
         val (colour, count) = link.blinks.last()
-        assertEquals(state.game!!.player(1).panel.argb and 0xFFFFFF, colour)
+        assertEquals(PixelsProtocol.ledColour(state.game!!.player(1).panel.argb), colour)
         assertEquals(3, count, "three flashes, not the single nudge")
     }
 
@@ -413,7 +414,7 @@ class PixelsWiringTest {
         state.nextTurn()
 
         val seat = state.game!!.turnSeat!!
-        assertEquals(state.game!!.player(seat).panel.argb and 0xFFFFFF, link.blinks.single().first)
+        assertEquals(PixelsProtocol.ledColour(state.game!!.player(seat).panel.argb), link.blinks.single().first)
     }
 
     @Test
@@ -441,7 +442,7 @@ class PixelsWiringTest {
 
         state.setMonarch(2)
 
-        assertEquals(state.game!!.player(2).panel.argb and 0xFFFFFF, link.blinks.single().first)
+        assertEquals(PixelsProtocol.ledColour(state.game!!.player(2).panel.argb), link.blinks.single().first)
     }
 
     // --- scanning ----------------------------------------------------------------------

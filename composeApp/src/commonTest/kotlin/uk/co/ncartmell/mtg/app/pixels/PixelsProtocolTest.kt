@@ -5,6 +5,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * The die's half of the conversation, checked without a die.
@@ -128,6 +129,50 @@ class PixelsProtocolTest {
         val long = PixelsProtocol.blink(rgb = 0, count = 900, durationMs = 100_000)
         assertEquals(255.toByte(), long[1], "count is a single byte")
         assertContentEquals(bytes(0xFF, 0xFF), long.copyOfRange(2, 4), "duration is two")
+    }
+
+    // --- brightness ---------------------------------------------------------------------
+
+    @Test
+    fun `a panel colour is scaled until its brightest channel is full`() {
+        // Gold sits at 72% of full on screen, green at 49%. On a lamp that is simply dim,
+        // and unevenly so, which is worse: the seats stop being equally distinguishable.
+        assertEquals(0xFFC841, PixelsProtocol.ledColour(0xB8912F), "gold")
+        assertEquals(0x5DFFA1, PixelsProtocol.ledColour(0x2E7D4F), "green")
+        assertEquals(0x55FFF8, PixelsProtocol.ledColour(0x2A7E7B), "teal")
+    }
+
+    @Test
+    fun `hue survives the scaling`() {
+        // Every channel moves by the same factor, so the ratios between them are the
+        // panel's ratios and the colour is still recognisably that player's.
+        val before = 0x2E7D4F
+        val after = PixelsProtocol.ledColour(before)
+        val r0 = (before shr 16) and 0xFF
+        val g0 = (before shr 8) and 0xFF
+        val r1 = (after shr 16) and 0xFF
+        val g1 = (after shr 8) and 0xFF
+        // Within a point, which is all integer division leaves.
+        assertTrue(kotlin.math.abs(r0.toDouble() / g0 - r1.toDouble() / g1) < 0.01)
+    }
+
+    @Test
+    fun `a colour already at full brightness is left alone`() {
+        assertEquals(0xFF0000, PixelsProtocol.ledColour(0xFF0000))
+        assertEquals(0xFFFFFF, PixelsProtocol.ledColour(0xFFFFFF))
+    }
+
+    @Test
+    fun `the alpha channel is ignored rather than mistaken for a colour`() {
+        assertEquals(
+            PixelsProtocol.ledColour(0xB8912F),
+            PixelsProtocol.ledColour(0xFFB8912F.toInt()),
+        )
+    }
+
+    @Test
+    fun `black has nowhere to go and stays off`() {
+        assertEquals(0, PixelsProtocol.ledColour(0x000000))
     }
 
     @Test

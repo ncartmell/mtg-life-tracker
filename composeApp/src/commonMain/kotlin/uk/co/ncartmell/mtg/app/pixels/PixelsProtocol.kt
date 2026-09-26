@@ -122,12 +122,40 @@ object PixelsProtocol {
     }
 
     /**
+     * A panel colour as the die should actually show it.
+     *
+     * The palette is chosen to sit on a dark screen, where a colour is a filled area read
+     * against its background. An LED is not that — it emits exactly the value it is handed,
+     * so gold comes out at seventy-two per cent of full and green at forty-nine, and the
+     * die ends up noticeably duller than the panel it is meant to match. Worse, how dull
+     * varies by colour, so the seats stop being equally distinguishable.
+     *
+     * Every channel is scaled until the brightest reaches full. The ratios between the
+     * channels are untouched, so the hue and the saturation are the panel's; only the
+     * brightness changes, which is the one thing a screen and a lamp cannot share.
+     *
+     * Black has nowhere to go: an unlit die is simply off, so the darkest seat comes out as
+     * the pale lavender its channels are pointing at. That is the honest answer rather than
+     * a special case.
+     */
+    fun ledColour(argb: Int): Int {
+        val r = (argb shr 16) and 0xFF
+        val g = (argb shr 8) and 0xFF
+        val b = argb and 0xFF
+        val peak = maxOf(r, g, b)
+        if (peak == 0) return 0
+        return ((r * 255 / peak) shl 16) or ((g * 255 / peak) shl 8) or (b * 255 / peak)
+    }
+
+    /**
      * Blinks the die [count] times over [durationMs] in an `0xRRGGBB` colour.
      *
      * [fade] is how soft the edges of each flash are, 0 being a hard on and off and 255
-     * the most gradual the firmware offers.
+     * the most gradual the firmware offers. Kept well below the middle: a flash that
+     * spends most of its time ramping never reaches the brightness it was asked for, which
+     * is the other half of why the die looked duller than the board.
      */
-    fun blink(rgb: Int, count: Int, durationMs: Int, fade: Int = 200): ByteArray {
+    fun blink(rgb: Int, count: Int, durationMs: Int, fade: Int = 90): ByteArray {
         // type, count, duration, colour, face mask, fade, loop — packed in that order.
         val out = ByteArray(14)
         out[0] = TYPE_BLINK.toByte()
