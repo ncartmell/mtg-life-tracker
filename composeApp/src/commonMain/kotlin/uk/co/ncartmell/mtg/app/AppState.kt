@@ -11,6 +11,7 @@ import uk.co.ncartmell.mtg.app.store.SetupMemory
 import uk.co.ncartmell.mtg.app.store.SetupRepository
 import uk.co.ncartmell.mtg.app.store.GameRepository
 import uk.co.ncartmell.mtg.app.pixels.PixelsController
+import uk.co.ncartmell.mtg.app.store.DieRepository
 import uk.co.ncartmell.mtg.app.store.createStorage
 import uk.co.ncartmell.mtg.app.store.nowMillis
 import uk.co.ncartmell.mtg.engine.Counter
@@ -55,7 +56,10 @@ class AppState(
      * used, this reports itself unsupported or unconnected and every screen behaves as it
      * did before any of it existed — the app's own dice are untouched.
      */
-    val pixels: PixelsController = PixelsController(clock = clock),
+    val pixels: PixelsController = PixelsController(
+        clock = clock,
+        dice = DieRepository(createStorage()),
+    ),
 ) {
     /** Whatever was on the table when the app last stopped. Read once, before anything. */
     private val resumed = inProgress.load()
@@ -180,6 +184,9 @@ class AppState(
         lastThrow = null
         rollOff = null
         screen = Screen.Game
+        // The one moment a die is plausibly on the table, which is when it is worth
+        // reaching for the radio. It says nothing if the die is still in its bag.
+        pixels.reconnectRemembered()
         past = emptyList()
         lastKind = null
         persist()
@@ -224,14 +231,28 @@ class AppState(
     fun rollForFirstPlayer() =
         updateGame { GameEngine.rollForFirstPlayer(it, random, at = clock()) }
 
-    fun nextTurn() = updateGame { GameEngine.nextTurn(it, at = clock()) }
+    fun nextTurn() {
+        val before = game?.turnSeat
+        updateGame { GameEngine.nextTurn(it, at = clock()) }
+        game?.turnSeat?.takeIf { it != before }?.let { lightTable(it, count = 1) }
+    }
+
+    /** Names the starting seat without rolling, for a table that has already decided. */
+    fun setFirstPlayer(seat: Int) =
+        updateGame { GameEngine.setStartingSeat(it, seat, at = clock()) }
 
     fun adjustCounter(seat: Int, counter: Counter, delta: Int) =
         updateGame("counter:$seat:$counter") { GameEngine.adjustCounter(it, seat, counter, delta) }
 
-    fun setMonarch(seat: Int?) = updateGame { GameEngine.setMonarch(it, seat) }
+    fun setMonarch(seat: Int?) {
+        updateGame { GameEngine.setMonarch(it, seat) }
+        seat?.let { lightTable(it, count = 2) }
+    }
 
-    fun setInitiative(seat: Int?) = updateGame { GameEngine.setInitiative(it, seat) }
+    fun setInitiative(seat: Int?) {
+        updateGame { GameEngine.setInitiative(it, seat) }
+        seat?.let { lightTable(it, count = 2) }
+    }
 
     fun setCitysBlessing(seat: Int, value: Boolean) =
         updateGame { GameEngine.setCitysBlessing(it, seat, value) }
@@ -331,6 +352,18 @@ class AppState(
     private fun blink(seat: Int, count: Int, durationMs: Int) {
         val paint = game?.player(seat)?.panel ?: return
         pixels.blink(paint.argb, count, durationMs)
+    }
+
+    /**
+     * Lights the die for something the game did rather than something the die did.
+     *
+     * Separate from [blink] because it is the half a table might not want: a roll lighting
+     * up is the die answering for itself, whereas the die flashing every time the turn
+     * passes is the app talking, and that is switched off with one toggle.
+     */
+    private fun lightTable(seat: Int, count: Int, durationMs: Int = 650) {
+        val paint = game?.player(seat)?.panel ?: return
+        pixels.blinkForTable(paint.argb, count, durationMs)
     }
 
     fun adjustLife(seat: Int, delta: Int) =

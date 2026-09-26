@@ -21,6 +21,7 @@ import platform.Foundation.NSData
 import platform.Foundation.NSError
 import platform.Foundation.NSNumber
 import platform.Foundation.NSTimer
+import platform.Foundation.NSUUID
 import platform.Foundation.create
 import platform.darwin.NSObject
 import platform.darwin.dispatch_get_main_queue
@@ -105,8 +106,11 @@ private class IosPixelsLink : PixelsLink {
     // --- connecting --------------------------------------------------------------------
 
     override fun connect(id: String) {
-        val manager = central ?: return
-        val peripheral = seen[id]
+        // Built here rather than only in scan(), so reconnecting to a remembered die does
+        // not have to go looking for something it already knows the identity of.
+        val manager = central
+            ?: CBCentralManager(delegate, dispatch_get_main_queue()).also { central = it }
+        val peripheral = seen[id] ?: manager.knownPeripheral(id)?.also { seen[id] = it }
         if (peripheral == null) {
             publish(PixelsStatus.Failed("That die is no longer there"))
             return
@@ -205,6 +209,7 @@ private class IosPixelsLink : PixelsLink {
         publish(PixelsStatus.Connected(peripheral.name ?: DEFAULT_NAME))
         // Asked once, so the app can say what it is holding and how full it is.
         write(PixelsProtocol.whoAreYou)
+        write(PixelsProtocol.requestBattery)
     }
 
     fun onValue(bytes: ByteArray) {
@@ -212,6 +217,10 @@ private class IosPixelsLink : PixelsLink {
             is PixelsMessage.Rolled -> listener?.onRolled(message.faceIndex)
             is PixelsMessage.Identity -> (status as? PixelsStatus.Connected)?.let {
                 publish(it.copy(dieType = message.dieType, batteryPercent = message.batteryPercent))
+            }
+
+            is PixelsMessage.Battery -> (status as? PixelsStatus.Connected)?.let {
+                publish(it.copy(batteryPercent = message.percent))
             }
 
             null -> Unit
@@ -279,6 +288,19 @@ private class PixelsDelegate(private val link: IosPixelsLink) :
         val data = didUpdateValueForCharacteristic.value ?: return
         link.onValue(data.toByteArray())
     }
+}
+
+/**
+ * A peripheral iOS already knows about, looked up by the identifier we stored.
+ *
+ * CoreBluetooth hands out its own UUID per device per install, which is exactly what
+ * this is for: the die does not have to be advertising, and no scan is needed.
+ */
+private fun CBCentralManager.knownPeripheral(id: String): CBPeripheral? {
+    val uuid = NSUUID(uUIDString = id)
+    return retrievePeripheralsWithIdentifiers(listOf(uuid))
+        .filterIsInstance<CBPeripheral>()
+        .firstOrNull()
 }
 
 @OptIn(ExperimentalForeignApi::class)

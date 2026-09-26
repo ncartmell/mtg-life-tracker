@@ -86,6 +86,17 @@ private class AndroidPixelsLink(private val context: Context) : PixelsLink {
 
     private val stopScanLater = Runnable { stopScan() }
 
+    /**
+     * Messages waiting to go out, because a GATT connection carries one at a time.
+     *
+     * Android does not queue for you: a second write issued before the first reports back
+     * is simply refused, and the failure is a boolean nobody checks. Asking the die what
+     * it is and how full it is — two messages, one after the other, the moment it
+     * connects — is exactly the case that loses one.
+     */
+    private val outbox = ArrayDeque<ByteArray>()
+    private var writing = false
+
     override val supported: Boolean =
         manager != null &&
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
@@ -169,6 +180,8 @@ private class AndroidPixelsLink(private val context: Context) : PixelsLink {
 
     /** Hangs up without announcing it, for the callers that publish their own status. */
     private fun closeGatt() {
+        outbox.clear()
+        writing = false
         gatt?.let {
             it.disconnect()
             it.close()
@@ -218,6 +231,18 @@ private class AndroidPixelsLink(private val context: Context) : PixelsLink {
                 publish(PixelsStatus.Connected(names[g.device.address] ?: DEFAULT_NAME))
                 // Asked once, so the app can say what it is holding and how full it is.
                 write(PixelsProtocol.whoAreYou)
+                write(PixelsProtocol.requestBattery)
+            }
+        }
+
+        override fun onCharacteristicWrite(
+            g: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            statusCode: Int,
+        ) {
+            main.post {
+                writing = false
+                drain()
             }
         }
 
@@ -247,6 +272,10 @@ private class AndroidPixelsLink(private val context: Context) : PixelsLink {
                 publish(it.copy(dieType = message.dieType, batteryPercent = message.batteryPercent))
             }
 
+            is PixelsMessage.Battery -> (status as? PixelsStatus.Connected)?.let {
+                publish(it.copy(batteryPercent = message.percent))
+            }
+
             null -> Unit
         }
     }
@@ -266,13 +295,35 @@ private class AndroidPixelsLink(private val context: Context) : PixelsLink {
         }
     }
 
-    @Suppress("DEPRECATION")
+    /** Queues a message. Sent straight away when nothing else is in flight. */
     private fun write(bytes: ByteArray) {
-        val g = gatt ?: return
+        outbox += bytes
+        drain()
+    }
+
+    private fun drain() {
+        if (writing) return
+        val g = gatt ?: run {
+            outbox.clear()
+            return
+        }
         val characteristic = g.getService(SERVICE)?.getCharacteristic(WRITE) ?: return
+        val bytes = outbox.removeFirstOrNull() ?: return
+        writing = send(g, characteristic, bytes)
+        // Nothing will report back for a write that was never accepted, so carry on
+        // rather than leaving everything behind it stuck.
+        if (!writing) drain()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun send(
+        g: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        bytes: ByteArray,
+    ): Boolean {
         val type = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            g.writeCharacteristic(characteristic, bytes, type)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeCharacteristic(characteristic, bytes, type) == BluetoothGatt.GATT_SUCCESS
         } else {
             characteristic.writeType = type
             characteristic.value = bytes

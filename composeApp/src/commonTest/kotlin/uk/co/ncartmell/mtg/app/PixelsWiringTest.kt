@@ -6,6 +6,7 @@ import uk.co.ncartmell.mtg.app.pixels.PixelsDieType
 import uk.co.ncartmell.mtg.app.pixels.PixelsLink
 import uk.co.ncartmell.mtg.app.pixels.PixelsListener
 import uk.co.ncartmell.mtg.app.pixels.PixelsStatus
+import uk.co.ncartmell.mtg.app.store.DieRepository
 import uk.co.ncartmell.mtg.app.store.GameRepository
 import uk.co.ncartmell.mtg.app.store.HistoryRepository
 import uk.co.ncartmell.mtg.app.store.ProfileRepository
@@ -18,6 +19,8 @@ import uk.co.ncartmell.mtg.engine.SeatSetup
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -41,9 +44,20 @@ private class FakeLink(override val supported: Boolean = true) : PixelsLink {
         this.listener = listener
     }
 
-    override fun scan() = Unit
+    /** Every id the app asked to connect to, so a reconnect can be seen happening. */
+    val connects = mutableListOf<String>()
+    var scans = 0
+
+    override fun scan() {
+        scans++
+    }
+
     override fun stopScan() = Unit
-    override fun connect(id: String) = Unit
+
+    override fun connect(id: String) {
+        connects += id
+    }
+
     override fun disconnect() = Unit
 
     override fun blink(rgb: Int, count: Int, durationMs: Int) {
@@ -54,6 +68,8 @@ private class FakeLink(override val supported: Boolean = true) : PixelsLink {
         listener?.onStatus(PixelsStatus.Connected(name, dieType, batteryPercent = 90))
 
     fun dropOut() = listener?.onStatus(PixelsStatus.Idle)
+
+    fun failToConnect() = listener?.onStatus(PixelsStatus.Failed("no die there"))
 
     fun find(device: PixelsDevice) = listener?.onFound(device)
 
@@ -72,6 +88,9 @@ class PixelsWiringTest {
 
     private var now = 1_000L
 
+    /** One store per state, so a second one can read what the first wrote. */
+    private val disk = Slots()
+
     private fun appState(link: FakeLink) = AppState(
         profiles = ProfileRepository(Slots()),
         history = HistoryRepository(Slots()),
@@ -79,7 +98,7 @@ class PixelsWiringTest {
         inProgress = GameRepository(Slots()),
         random = Random(1),
         clock = { now },
-        pixels = PixelsController(link, clock = { now }),
+        pixels = PixelsController(link, clock = { now }, dice = DieRepository(disk)),
     )
 
     private fun AppState.start(players: Int = 4) = startGame(
@@ -294,6 +313,135 @@ class PixelsWiringTest {
         state.startRollOff()
 
         assertEquals(listOf(0, 3, 2), assertNotNull(state.rollOff).contenders)
+    }
+
+    // --- scanning ----------------------------------------------------------------------
+
+    // --- remembering it ----------------------------------------------------------------
+
+    @Test
+    fun `connecting to a die is remembered for next time`() {
+        val link = FakeLink()
+        val state = appState(link)
+        state.pixels.connect(PixelsDevice("aa:bb", "Bulbasaur"))
+        link.connectAs(name = "Bulbasaur")
+
+        assertEquals("aa:bb", state.pixels.remembered.id)
+        assertEquals("Bulbasaur", state.pixels.remembered.name)
+
+        // A fresh state on the same device gets it back without a scan.
+        val next = appState(FakeLink())
+        assertEquals("aa:bb", next.pixels.remembered.id)
+    }
+
+    @Test
+    fun `a die is not remembered until it actually answers`() {
+        val link = FakeLink()
+        val state = appState(link)
+        state.pixels.connect(PixelsDevice("aa:bb", "Bulbasaur"))
+        link.failToConnect()
+        assertNull(state.pixels.remembered.id)
+    }
+
+    @Test
+    fun `starting a game reaches for the die that was used last`() {
+        val link = FakeLink()
+        appState(link).apply {
+            pixels.connect(PixelsDevice("aa:bb", "Bulbasaur"))
+            link.connectAs()
+        }
+
+        val next = FakeLink()
+        appState(next).start()
+
+        assertEquals(listOf("aa:bb"), next.connects, "and without scanning for it")
+        assertEquals(0, next.scans)
+    }
+
+    @Test
+    fun `a remembered die that is not about says nothing`() {
+        val link = FakeLink()
+        appState(link).apply {
+            pixels.connect(PixelsDevice("aa:bb", "Bulbasaur"))
+            link.connectAs()
+        }
+
+        val next = FakeLink()
+        val state = appState(next).also { it.start() }
+        next.failToConnect()
+
+        assertEquals(
+            PixelsStatus.Idle,
+            state.pixels.status,
+            "nobody asked for it, so a die left in its bag is not an error",
+        )
+    }
+
+    @Test
+    fun `a die asked for by hand does report that it could not be reached`() {
+        val link = FakeLink()
+        val state = appState(link)
+        state.pixels.connect(PixelsDevice("aa:bb", "Bulbasaur"))
+        link.failToConnect()
+        assertIs<PixelsStatus.Failed>(state.pixels.status)
+    }
+
+    @Test
+    fun `forgetting a die keeps the lighting preference`() {
+        val link = FakeLink()
+        val state = appState(link)
+        state.pixels.connect(PixelsDevice("aa:bb", "Bulbasaur"))
+        link.connectAs()
+        state.pixels.lightsTheTable = false
+
+        state.pixels.forgetDie()
+
+        assertNull(state.pixels.remembered.id)
+        assertFalse(state.pixels.lightsTheTable)
+    }
+
+    // --- lighting the table ------------------------------------------------------------
+
+    @Test
+    fun `passing the turn lights the die in the new player's colour`() {
+        val link = FakeLink()
+        val state = appState(link).apply { start() }
+        link.connectAs()
+        state.rollForFirstPlayer()
+        link.blinks.clear()
+
+        state.nextTurn()
+
+        val seat = state.game!!.turnSeat!!
+        assertEquals(state.game!!.player(seat).panel.argb and 0xFFFFFF, link.blinks.single().first)
+    }
+
+    @Test
+    fun `turning the table light off stops the turns but not the rolls`() {
+        val link = FakeLink()
+        val state = appState(link).apply { start() }
+        link.connectAs()
+        state.pixels.lightsTheTable = false
+        state.rollForFirstPlayer()
+        link.blinks.clear()
+
+        state.nextTurn()
+        assertTrue(link.blinks.isEmpty(), "the app talking, which was switched off")
+
+        state.startRollOff()
+        assertTrue(link.blinks.isNotEmpty(), "the die answering for itself, which was not")
+    }
+
+    @Test
+    fun `taking the monarchy lights the die`() {
+        val link = FakeLink()
+        val state = appState(link).apply { start() }
+        link.connectAs()
+        link.blinks.clear()
+
+        state.setMonarch(2)
+
+        assertEquals(state.game!!.player(2).panel.argb and 0xFFFFFF, link.blinks.single().first)
     }
 
     // --- scanning ----------------------------------------------------------------------

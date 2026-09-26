@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -112,10 +114,13 @@ fun SetupScreen(state: AppState) {
         state.startGame(settings, seats)
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // The bar is laid over the list rather than below it, so the list can run underneath
+    // and fade out at the button instead of being sliced off square at its top edge.
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
-        Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp),
+        Modifier.fillMaxSize().padding(horizontal = 16.dp).padding(top = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(bottom = 84.dp),
     ) {
         item {
             Row(
@@ -224,13 +229,23 @@ fun SetupScreen(state: AppState) {
 
     // Pinned, so starting a game never means scrolling past six seat cards to find the
     // button — which is the single thing this screen exists to do.
-    Box(
-        Modifier.fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp),
-    ) {
-        Button(onClick = start, modifier = Modifier.fillMaxWidth()) {
-            Text("Start game")
+    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+        Box(
+            Modifier.fillMaxWidth().height(20.dp).background(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, MaterialTheme.colorScheme.background),
+                ),
+            ),
+        )
+        Box(
+            Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp),
+        ) {
+            Button(onClick = start, modifier = Modifier.fillMaxWidth()) {
+                Text("Start game")
+            }
         }
     }
     }

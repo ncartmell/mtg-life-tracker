@@ -93,7 +93,11 @@ signature, which the sideloading tools above add using your own Apple ID.
 - A swipe across the middle of a panel opens that player's detail. There is no button
   competing with their name for the width
 - A roll screen: the whole table's roll for first player laid out in order, tie-breaks
-  shown as the separate rounds they were, and ordinary dice from d4 to d20 plus a coin
+  shown as the separate rounds they were, and ordinary dice from d4 to d20 plus a coin.
+  Several at once, since plenty of cards ask for that and adding them up by hand is the
+  sort of thing the app is for, and any number of sides for the cards that want a d3 or
+  a d7. Or skip the roll entirely and simply name whoever is starting — not every table
+  decides this by rolling, and staging a roll to record a decision already made is silly
 - A [Pixels](https://gamewithpixels.com) die, for anyone who has one. The app finds it
   over Bluetooth and takes its rolls, and none of it appears unless a die is actually
   connected — the app's own dice are untouched and still do everything they did.
@@ -110,6 +114,11 @@ signature, which the sideloading tools above add using your own Apple ID.
     tied, and the winner's colour flashes when it settles
   - One throw reported twice as the die comes to rest is still one throw, which matters
     when the next number belongs to somebody else
+  - The die is remembered, so the next game reaches for it on its own rather than
+    scanning again. It also lights up in the current player's colour as the turn passes,
+    and in the colour of whoever takes the monarchy or the initiative — switchable off,
+    since a light that goes off every turn is either lovely or maddening depending on
+    the group — and says so when it is nearly flat
   - Android and iOS only. The desktop builds have no Bluetooth and never mention dice
 - Every finished game kept — seats, who won, how long — under the leaderboard, so the
   running totals can be traced back to the games behind them
@@ -120,6 +129,13 @@ signature, which the sideloading tools above add using your own Apple ID.
   background hands the table back the same game rather than an empty setup screen
 - A player who is out has their colour drained away and is marked plainly, so the board
   reads at a glance; the winner is ringed and labelled on the board, not only in a dialog
+- Counters sit in chips that fill as they approach the number that kills you, so a panel
+  gets louder as its player gets closer to losing, and the detail view colours the same
+  thresholds rather than leaving somebody on nineteen commander damage to subtract for
+  themselves
+- Whose turn it is is marked on the player's own name rather than beside it, and the
+  life total is sized to the panel it is on, so a four-player board on a tablet is read
+  across a room rather than leaving half the card empty
 - A player can be marked as unable to lose, for Platinum Angel and the like. Counters are
   not frozen underneath it — life still falls past zero — and everything that built up is
   applied the moment the flag is cleared, which is what happens when the permanent
@@ -237,6 +253,6 @@ start mid-game is worse.
   standard library, and reaching one would mean a separate native bridge for each of
   Windows, macOS and Linux — three ways to fail, for the build least likely to be sitting
   on a table with a die next to it
-- Only one die at a time, and it is not remembered between launches: finding it again is
-  two taps, and a die that reconnected on its own would start reporting rolls from
-  whichever bag it was in
+- Only one die at a time. Several dice at once would let a whole table roll off
+  simultaneously rather than passing one round, which is a bigger change than it looks:
+  the link holds a single connection throughout

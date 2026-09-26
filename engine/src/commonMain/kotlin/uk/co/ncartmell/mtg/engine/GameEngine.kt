@@ -381,6 +381,27 @@ object GameEngine {
             turnStartedAt = at,
         )
 
+    /**
+     * Names the starting seat without rolling for it.
+     *
+     * A table that has already decided — with real dice, or because somebody lost last
+     * week, or because it is simply their turn to start — should not have to stage a roll
+     * to tell the app about it. Any previous roll is cleared rather than left standing:
+     * the numbers on the panels would otherwise claim to explain a decision they had no
+     * part in.
+     */
+    fun setStartingSeat(state: GameState, seat: Int, at: Long? = null): GameState {
+        val player = state.players.firstOrNull { it.seat == seat } ?: return state
+        if (player.isOut) return state
+        return state.copy(
+            startingSeat = seat,
+            lastRoll = null,
+            turnSeat = seat,
+            turnCount = 1,
+            turnStartedAt = at,
+        )
+    }
+
     /** Rolls dice for their own sake — a coin is two sides. */
     fun rollDice(sides: Int, count: Int = 1, random: Random = Random): DiceThrow {
         require(sides > 1) { "A die needs more than one side" }

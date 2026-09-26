@@ -43,6 +43,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
@@ -177,9 +178,16 @@ fun GameScreen(state: AppState) {
 @Composable
 private fun MenuButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val tint = MaterialTheme.colorScheme.primary
+    // A ring of board colour around the button. The panels are rotated to face their
+    // players, which puts two of the four names right where this sits; without the gap
+    // the button looked like it had landed on somebody's card.
     Box(
-        modifier
-            .size(52.dp)
+        modifier.size(62.dp).clip(CircleShape).background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center,
+    ) {
+    Box(
+        Modifier
+            .size(46.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.background)
             .border(2.dp, tint, CircleShape)
@@ -187,8 +195,9 @@ private fun MenuButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            repeat(3) { Box(Modifier.size(width = 20.dp, height = 2.dp).background(tint)) }
+            repeat(3) { Box(Modifier.size(width = 18.dp, height = 2.dp).background(tint)) }
         }
+    }
     }
 }
 
@@ -322,6 +331,20 @@ private fun PlayerPanel(
         label = "cardTo",
     )
 
+    // The name is filled in with the card's own ink on the turn it belongs to, and reads
+    // back as the card colour, which is the strongest mark available that is attached to
+    // something rather than floating next to it.
+    val nameFill by animateColorAsState(
+        targetValue = if (isTheirTurn) ink else Color.Transparent,
+        animationSpec = tween(240),
+        label = "nameFill",
+    )
+    val nameInk by animateColorAsState(
+        targetValue = if (isTheirTurn) cardColour else ink,
+        animationSpec = tween(240),
+        label = "nameInk",
+    )
+
     val ringWidth by animateDpAsState(
         targetValue = when {
             hasWon -> WIN_RING_WIDTH
@@ -388,14 +411,32 @@ private fun PlayerPanel(
             // Six players on a phone leaves each panel about a third of the screen, so the
             // life row shrinks to fit rather than running off the edge of the card.
             val tight = maxWidth < 170.dp
-            val glyphSize = if (tight) 22.sp else 30.sp
+            // A four-player board on a tablet gives each panel more reading width than
+            // the two-figure total was ever sized for, and the difference went to waste
+            // as empty card. Three tiers rather than two, so a big panel uses its space.
+            val roomy = maxWidth >= 210.dp
+            val glyphSize = when {
+                tight -> 22.sp
+                roomy -> 34.sp
+                else -> 30.sp
+            }
+            // The disc is a fixed size rather than a multiple of the glyph, and its column
+            // a fixed width rather than a share of what is left. Splitting the remainder
+            // meant a big total starved the glyphs of room and squashed both discs into
+            // slots narrower than they were tall.
+            val discSize = when {
+                tight -> 32.dp
+                roomy -> 48.dp
+                else -> 42.dp
+            }
             // A panel does not grow to suit a three-figure total, so the total shrinks to
             // suit the panel. Sizes are stepped rather than continuous so that a life
             // total does not visibly resize on every single point of damage.
+            // Sized for what is left once the two glyph columns have taken theirs.
             val lifeSize = when (player.life.toString().length) {
-                in 0..2 -> if (tight) 40.sp else 62.sp
-                3 -> if (tight) 30.sp else 48.sp
-                else -> if (tight) 23.sp else 36.sp
+                in 0..2 -> when { tight -> 40.sp; roomy -> 84.sp; else -> 62.sp }
+                3 -> when { tight -> 30.sp; roomy -> 62.sp; else -> 48.sp }
+                else -> when { tight -> 23.sp; roomy -> 46.sp; else -> 36.sp }
             }
 
             val openDetail = onOpenDetail
@@ -460,21 +501,6 @@ private fun PlayerPanel(
             // the board's own dark has nowhere to recede to, so on their turn the board
             // would not change at all. The bar is drawn in the card's ink, which is picked
             // to contrast with that card whatever colour it is, so it reads on all five.
-            val barWidth by animateDpAsState(
-                targetValue = if (isTheirTurn) (if (tight) 30.dp else 44.dp) else 0.dp,
-                animationSpec = tween(220),
-                label = "turnBar",
-            )
-            if (barWidth > 0.dp) {
-                Box(
-                    Modifier.align(Alignment.TopCenter)
-                        .padding(top = 5.dp)
-                        .width(barWidth)
-                        .height(4.dp)
-                        .background(ink, RoundedCornerShape(2.dp)),
-                )
-            }
-
             // Overlaid rather than stacked. Stacking centred the total in whatever was
             // left between the name and the counters, and those two bands are different
             // heights, so the total sat off centre by the difference.
@@ -523,46 +549,45 @@ private fun PlayerPanel(
                             )
                         }
                     } else {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // The total takes the width it needs and the glyphs split
-                            // what is left. Giving the total a fixed third instead cut the
-                            // digits off at the edges. Splitting the remainder still leaves
-                            // each glyph inside the third that responds to it.
-                            StepGlyph("\u2212", ink, glyphSize, Modifier.weight(1f))
-                            // Slides the way the total moved, so a change is visible
-                            // even to someone who was not looking at that panel.
-                            AnimatedContent(
-                                targetState = player.life,
-                                transitionSpec = {
-                                    val down = targetState < initialState
-                                    val h = if (down) -1 else 1
-                                    (
-                                        slideInVertically(tween(180)) { it * h / 3 } +
-                                            fadeIn(tween(180))
-                                        ) togetherWith (
-                                        slideOutVertically(tween(180)) { -it * h / 3 } +
-                                            fadeOut(tween(180))
-                                        )
-                                },
-                                modifier = Modifier.padding(horizontal = 2.dp),
-                                label = "life",
-                            ) { life ->
-                                Text(
-                                    life.toString(),
-                                    color = ink,
-                                    fontSize = lifeSize,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                )
-                            }
-                            StepGlyph("+", ink, glyphSize, Modifier.weight(1f))
+                        // The total is centred in the whole panel and the glyphs sit out
+                        // at the edges, over the thirds that actually respond to a press.
+                        // Laying all three out in a row instead meant the glyph columns
+                        // took more than half the card, and the total was clipped to fit
+                        // what was left — on the very panels that had room to spare.
+                        AnimatedContent(
+                            targetState = player.life,
+                            transitionSpec = {
+                                val down = targetState < initialState
+                                val h = if (down) -1 else 1
+                                (
+                                    slideInVertically(tween(180)) { it * h / 3 } +
+                                        fadeIn(tween(180))
+                                    ) togetherWith (
+                                    slideOutVertically(tween(180)) { -it * h / 3 } +
+                                        fadeOut(tween(180))
+                                    )
+                            },
+                            // Clear of the discs, so a three-figure total never lands
+                            // underneath one.
+                            modifier = Modifier.padding(horizontal = discSize + 2.dp),
+                            label = "life",
+                        ) { life ->
+                            Text(
+                                life.toString(),
+                                color = ink,
+                                fontSize = lifeSize,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
                         }
                     }
+                }
+
+                if (!player.isOut && !hasWon) {
+                    StepGlyph("\u2212", ink, glyphSize, discSize, Modifier.align(Alignment.CenterStart))
+                    StepGlyph("+", ink, glyphSize, discSize, Modifier.align(Alignment.CenterEnd))
                 }
 
                 Row(
@@ -573,16 +598,27 @@ private fun PlayerPanel(
                     // No button here any more: the name gets the whole row, and the
                     // detail opens by swiping the middle of the panel. The button's
                     // minimum width was what truncated "Player 3" to "Player".
-                    Text(
-                        player.name + if (goesFirst && !tight) " \u00b7 first" else "",
-                        color = ink,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        softWrap = false,
-                        style = if (tight) MaterialTheme.typography.labelMedium
-                        else MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
+                    // Whose turn it is, said on the name rather than beside it. A bar
+                    // floating in from the card's edge had nothing to belong to \u2014 short it
+                    // read as a stray tick, long it read as a scrollbar, and on the player
+                    // who had also won the roll it merged into their ring. A filled name
+                    // cannot be mistaken for any of the three.
+                    Box(
+                        Modifier.weight(1f, fill = false)
+                            .clip(CHIP_SHAPE)
+                            .background(nameFill)
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    ) {
+                        Text(
+                            player.name + if (goesFirst && !tight) " \u00b7 first" else "",
+                            color = nameInk,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false,
+                            style = if (tight) MaterialTheme.typography.labelMedium
+                            else MaterialTheme.typography.titleSmall,
+                        )
+                    }
                     AnimatedVisibility(
                         visible = game.monarchSeat == player.seat,
                         enter = scaleIn(tween(200)) + fadeIn(tween(200)),
@@ -646,16 +682,22 @@ private fun PlayerPanel(
                     }
 
                     game.lastRoll?.openingRoll?.get(player.seat)?.let { rolled ->
-                        Counter("Roll", rolled, null, ink)
+                        Counter("Roll", rolled, null, ink, cardColour)
                     }
 
                     player.activeCounters.forEach { (counter, value) ->
-                        Counter(counter.short, value, null, ink)
+                        Counter(counter.short, value, counter.max, ink, cardColour)
                     }
 
                     // Like commander damage: shown once it exists, not as a standing zero.
                     if (game.settings.poisonEnabled && player.poison > 0) {
-                        Counter("Poison", player.poison, game.settings.poisonThreshold, ink)
+                        Counter(
+                            "Poison",
+                            player.poison,
+                            game.settings.poisonThreshold,
+                            ink,
+                            cardColour,
+                        )
                     }
 
                     // One entry per commander that has actually connected. A single
@@ -672,6 +714,7 @@ private fun PlayerPanel(
                                     amount = amount,
                                     threshold = game.settings.commanderDamageThreshold,
                                     ink = ink,
+                                    on = cardColour,
                                 )
                             }
                     }
@@ -721,6 +764,35 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                             onClick = state::startRollOff,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("Pass the die round instead") }
+                    }
+
+                    // Not every table decides this by rolling. Some have already rolled
+                    // their own dice, some take it in turns week to week, and some simply
+                    // know. Staging a roll to record a decision already made is silly.
+                    var byHand by remember { mutableStateOf(false) }
+                    TextButton(onClick = { byHand = !byHand }) {
+                        Text(if (byHand) "Never mind" else "Or just pick someone")
+                    }
+                    if (byHand) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            game.livePlayers.forEach { player ->
+                                OutlinedButton(onClick = {
+                                    state.setFirstPlayer(player.seat)
+                                    byHand = false
+                                }) {
+                                    Box(
+                                        Modifier.size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(player.panel.baseColor()),
+                                    )
+                                    Box(Modifier.size(6.dp))
+                                    Text(player.name, maxLines = 1, softWrap = false)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -805,37 +877,110 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                 }
 
                 Text("Dice", fontWeight = FontWeight.SemiBold)
+
+                // The engine has always taken a count, and this dialog has always passed
+                // one. Plenty of cards ask for several dice at once, and rolling them one
+                // at a time and adding up by hand is exactly what the app is here to save.
+                var count by remember { mutableStateOf(1) }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "How many",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = { count = (count - 1).coerceAtLeast(1) },
+                        enabled = count > 1,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) { Text("−") }
+                    Text(
+                        count.toString(),
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    OutlinedButton(
+                        onClick = { count = (count + 1).coerceAtMost(MAX_DICE) },
+                        enabled = count < MAX_DICE,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) { Text("+") }
+                }
+
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     listOf(4, 6, 8, 10, 12, 20).forEach { sides ->
-                        OutlinedButton(onClick = { state.rollDice(sides) }) { Text("d$sides") }
+                        OutlinedButton(onClick = { state.rollDice(sides, count) }) {
+                            Text("d$sides")
+                        }
                     }
-                    OutlinedButton(onClick = { state.rollDice(2) }) { Text("Coin") }
+                    OutlinedButton(onClick = { state.rollDice(2, count) }) {
+                        Text(if (count > 1) "Coins" else "Coin")
+                    }
+                }
+
+                // Cards ask for stranger dice than the six on that row — a d3, a d7, a
+                // hundred-sided anything — and the engine will roll any of them.
+                var custom by remember { mutableStateOf("") }
+                val customSides = custom.toIntOrNull()
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = custom,
+                        onValueChange = { custom = it.filter(Char::isDigit).take(4) },
+                        label = { Text("Any other die") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(
+                        onClick = { customSides?.let { state.rollDice(it, count) } },
+                        enabled = customSides != null && customSides > 1,
+                    ) { Text("Roll") }
                 }
 
                 state.lastThrow?.let { thrown ->
+                    val several = thrown.values.size > 1
                     Text(
-                        if (thrown.isCoin) {
-                            if (thrown.values.single() == 2) "Heads" else "Tails"
-                        } else {
-                            thrown.total.toString()
+                        when {
+                            // Several coins have no total worth printing, so they are
+                            // counted instead — which is what the card asking for them
+                            // almost always wants to know.
+                            thrown.isCoin && several ->
+                                "${thrown.values.count { it == 2 }} heads, " +
+                                    "${thrown.values.count { it == 1 }} tails"
+
+                            thrown.isCoin -> if (thrown.values.first() == 2) "Heads" else "Tails"
+                            else -> thrown.total.toString()
                         },
                         style = MaterialTheme.typography.displaySmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                    if (!thrown.isCoin) {
-                        Text(
-                            "d${thrown.sides}" +
-                                if (thrown.values.size > 1) {
-                                    " — " + thrown.values.joinToString(" + ")
-                                } else "",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        when {
+                            thrown.isCoin && several ->
+                                thrown.values.joinToString(" · ") {
+                                    if (it == 2) "H" else "T"
+                                }
+
+                            thrown.isCoin -> ""
+                            several ->
+                                "${thrown.values.size} × d${thrown.sides}  —  " +
+                                    thrown.values.joinToString(" + ")
+
+                            else -> "d${thrown.sides}"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
                 PixelsPanel(state)
@@ -943,6 +1088,32 @@ private fun PixelsPanel(state: AppState) {
                 TextButton(onClick = pixels::disconnect) { Text("Disconnect") }
             }
             note("Roll it and the number lands here, as a d${pixels.dieFaces}.")
+
+            // Worth saying before a game rather than in the middle of one.
+            if (pixels.batteryLow) {
+                note(
+                    "Nearly flat — worth charging before you start.",
+                    MaterialTheme.colorScheme.error,
+                )
+            }
+
+            // The die is a shared object in the middle of the table, so a light that
+            // goes off every turn is either lovely or maddening depending on the group.
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Light it up for turns too",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Switch(
+                    checked = pixels.lightsTheTable,
+                    onCheckedChange = { pixels.lightsTheTable = it },
+                )
+            }
         }
 
         is PixelsStatus.Connecting -> note("Connecting to ${status.name}…")
@@ -971,10 +1142,30 @@ private fun PixelsPanel(state: AppState) {
 
         PixelsStatus.Idle -> {
             found()
-            OutlinedButton(
-                onClick = pixels::scan,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Look for a die") }
+            // The die this device used last, offered first. A group owns one die and uses
+            // it every week, so a scan is almost always the long way round to the answer
+            // the app already had.
+            val known = pixels.remembered.takeIf { it.known }
+            if (known != null && pixels.found.none { it.id == known.id }) {
+                Button(
+                    onClick = pixels::reconnectRemembered,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Connect to ${known.name ?: "your die"}") }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = pixels::scan, modifier = Modifier.weight(1f)) {
+                        Text("Look for another")
+                    }
+                    TextButton(onClick = pixels::forgetDie) { Text("Forget") }
+                }
+            } else {
+                OutlinedButton(
+                    onClick = pixels::scan,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Look for a die") }
+            }
         }
 
         // Never reached: the whole panel is skipped when dice are unsupported.
@@ -1072,6 +1263,12 @@ private val RING_INSET = 3.dp
 private val RING_WIDTH = 3.dp
 private val WIN_RING_WIDTH = 6.dp
 private val RING_SHAPE = RoundedCornerShape(9.dp)
+
+/** What the engine will roll at once, and more than any card has ever asked for. */
+private const val MAX_DICE = 20
+
+/** Wide and fully rounded, so it reads as a marker rather than a stray tick. */
+private val TURN_BAR_SHAPE = RoundedCornerShape(3.dp)
 
 private const val HOLD_BEFORE_REPEAT_MS = 400L
 private const val FIRST_REPEAT_MS = 180L
@@ -1216,32 +1413,98 @@ private fun Color.drained(): Color = Color(
     alpha = 1f,
 )
 
-/** Only a label — the press is handled by the full-height column behind it. */
+/**
+ * Only a label — the press is handled by the full-height column behind it.
+ *
+ * Sat in a faint disc of the card's own ink, which is the only hint the panel gives that
+ * a whole third of it is pressable. A bare glyph floating in the middle of all that empty
+ * card read as decoration, and the app's best gesture was also its least discoverable.
+ */
 @Composable
-private fun StepGlyph(label: String, ink: Color, glyph: TextUnit, modifier: Modifier = Modifier) {
-    Text(
-        label,
-        color = ink,
-        fontSize = glyph,
-        fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center,
-        maxLines = 1,
-        softWrap = false,
-        modifier = modifier,
+private fun StepGlyph(
+    label: String,
+    ink: Color,
+    glyph: TextUnit,
+    disc: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.size(disc), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(disc)
+                .clip(CircleShape)
+                .background(ink.copy(alpha = 0.11f)),
+        )
+        Text(
+            label,
+            color = ink,
+            fontSize = glyph,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+/**
+ * A counter on a panel, as a chip rather than a run of text.
+ *
+ * Bare text gave poison — four counters from killing you — the same weight as the number
+ * somebody rolled for first player, and ran two counters together into "Roll 4  E 3". A
+ * chip gives each one an edge to be read against, and one with a threshold fills as it
+ * approaches it, so a panel gets louder as its player gets closer to dying.
+ */
+@Composable
+private fun Counter(label: String, value: Int, threshold: Int?, ink: Color, on: Color) {
+    CounterChip(
+        text = "$label $value" + (threshold?.let { "/$it" } ?: ""),
+        ink = ink,
+        on = on,
+        pressure = threshold?.let { value.toFloat() / it } ?: 0f,
     )
 }
 
+/** [on] is the panel behind the chip, used for the text once the chip fills with ink. */
 @Composable
-private fun Counter(label: String, value: Int, threshold: Int?, ink: Color) {
-    Text(
-        "$label $value" + (threshold?.let { "/$it" } ?: ""),
-        color = ink,
-        style = MaterialTheme.typography.labelMedium,
-        maxLines = 1,
-        softWrap = false,
-        fontWeight = if (value > 0) FontWeight.Bold else FontWeight.Normal,
+private fun CounterChip(
+    text: String,
+    ink: Color,
+    on: Color,
+    pressure: Float,
+    leading: @Composable (() -> Unit)? = null,
+) {
+    val full = pressure >= 1f
+    val close = pressure >= CLOSE_ENOUGH
+    val fill by animateColorAsState(
+        targetValue = when {
+            full -> ink
+            close -> ink.copy(alpha = 0.32f)
+            else -> ink.copy(alpha = 0.14f)
+        },
+        animationSpec = tween(260),
+        label = "chip",
     )
+    Row(
+        Modifier.clip(CHIP_SHAPE).background(fill).padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        leading?.invoke()
+        Text(
+            text,
+            color = if (full) on else ink,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (close) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
 }
+
+private val CHIP_SHAPE = RoundedCornerShape(6.dp)
+
+/** Close enough to a threshold that the panel should start saying so. */
+private const val CLOSE_ENOUGH = 0.7f
 
 /**
  * Damage from one commander, tagged with its owner's colour rather than their name: the
@@ -1255,24 +1518,22 @@ private fun CommanderDamage(
     amount: Int,
     threshold: Int,
     ink: Color,
+    on: Color,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(9.dp)
-                .clip(CircleShape)
-                .background(owner.colour.composeColor())
-                .border(1.dp, ink, CircleShape),
-        )
-        Box(Modifier.size(4.dp))
-        Text(
-            (if (owner.commanderCount > 1) "#${index + 1} " else "") + "$amount/$threshold",
-            color = ink,
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            softWrap = false,
-            fontWeight = if (amount >= threshold) FontWeight.Bold else FontWeight.Normal,
-        )
-    }
+    CounterChip(
+        text = (if (owner.commanderCount > 1) "#${index + 1} " else "") + "$amount/$threshold",
+        ink = ink,
+        on = on,
+        pressure = amount.toFloat() / threshold,
+        leading = {
+            Box(
+                Modifier.size(9.dp)
+                    .clip(CircleShape)
+                    .background(owner.colour.composeColor())
+                    .border(1.dp, ink, CircleShape),
+            )
+        },
+    )
 }
 
 /** Everything that does not fit on a panel: poison, commander damage, and losing. */
@@ -1308,6 +1569,7 @@ private fun PlayerDetailDialog(
                     DialogSection("Poison")
                     Adjuster(
                         label = "${player.poison} of ${game.settings.poisonThreshold}",
+                        pressure = player.poison.toFloat() / game.settings.poisonThreshold,
                         onMinus = { state.adjustPoison(player.seat, -1) },
                         onPlus = { state.adjustPoison(player.seat, 1) },
                     )
@@ -1322,6 +1584,8 @@ private fun PlayerDetailDialog(
                             label = "${owner.name}$suffix",
                             value = player.damageFrom(commander),
                             tint = owner.colour.composeColor(),
+                            pressure = player.damageFrom(commander).toFloat() /
+                                game.settings.commanderDamageThreshold,
                             onMinus = { state.adjustCommanderDamage(player.seat, commander, -1) },
                             onPlus = { state.adjustCommanderDamage(player.seat, commander, 1) },
                         )
@@ -1377,6 +1641,8 @@ private fun PlayerDetailDialog(
                         label = counter.label +
                             (counter.max?.let { " (max $it)" } ?: ""),
                         value = player[counter],
+                        // Only the capped counters have anywhere to get to.
+                        pressure = counter.max?.let { player[counter].toFloat() / it } ?: 0f,
                         onMinus = { state.adjustCounter(player.seat, counter, -1) },
                         onPlus = { state.adjustCounter(player.seat, counter, 1) },
                     )
@@ -1518,17 +1784,40 @@ private fun Adjuster(
     label: String,
     value: Int? = null,
     tint: Color? = null,
+    /**
+     * How close this number is to the one that ends the game for its player, where one is
+     * already there. The board says this with a chip that fills; here there is room for
+     * colour instead, but it is the same idea on the same thresholds — somebody on
+     * nineteen commander damage should not have to do the subtraction themselves.
+     */
+    pressure: Float = 0f,
     onMinus: () -> Unit,
     onPlus: () -> Unit,
 ) {
+    val alarm = when {
+        pressure >= 1f -> MaterialTheme.colorScheme.error
+        pressure >= CLOSE_ENOUGH -> MaterialTheme.colorScheme.primary
+        else -> null
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         tint?.let {
             Box(Modifier.size(10.dp).clip(CircleShape).background(it))
             Box(Modifier.size(8.dp))
         }
-        Text(label, Modifier.weight(1f), maxLines = 1)
+        Text(
+            label,
+            Modifier.weight(1f),
+            maxLines = 1,
+            color = alarm ?: LocalContentColor.current,
+            fontWeight = if (alarm != null) FontWeight.Bold else FontWeight.Normal,
+        )
         value?.let {
-            Text(it.toString(), Modifier.padding(end = 10.dp), fontWeight = FontWeight.Bold)
+            Text(
+                it.toString(),
+                Modifier.padding(end = 10.dp),
+                fontWeight = FontWeight.Bold,
+                color = alarm ?: LocalContentColor.current,
+            )
         }
         StepperButton("−", onMinus)
         Box(Modifier.size(8.dp))

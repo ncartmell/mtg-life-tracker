@@ -1,5 +1,6 @@
 package uk.co.ncartmell.mtg.engine
 
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -146,5 +147,39 @@ class RollOffTest {
         assertEquals(1, next.turnCount)
         assertEquals(1_000L, next.turnStartedAt)
         assertEquals(roll, next.lastRoll)
+    }
+
+    // --- deciding without rolling ------------------------------------------------------
+
+    @Test
+    fun `a starting seat can simply be named`() {
+        val next = GameEngine.setStartingSeat(game(players = 4), seat = 2, at = 500L)
+        assertEquals(2, next.startingSeat)
+        assertEquals(2, next.turnSeat)
+        assertEquals(1, next.turnCount)
+        assertEquals(500L, next.turnStartedAt)
+    }
+
+    @Test
+    fun `naming a seat clears a roll that did not decide it`() {
+        val rolled = GameEngine.rollForFirstPlayer(game(players = 4), Random(1))
+        assertNotNull(rolled.lastRoll)
+
+        val next = GameEngine.setStartingSeat(rolled, seat = 3)
+
+        assertEquals(3, next.startingSeat)
+        assertNull(next.lastRoll, "those numbers explained a different decision")
+    }
+
+    @Test
+    fun `a seat that is out cannot be given the first turn`() {
+        val state = GameEngine.eliminate(game(players = 4), seat = 1, reason = LossReason.Conceded)
+        assertEquals(state, GameEngine.setStartingSeat(state, seat = 1))
+    }
+
+    @Test
+    fun `a seat that does not exist changes nothing`() {
+        val state = game(players = 4)
+        assertEquals(state, GameEngine.setStartingSeat(state, seat = 9))
     }
 }

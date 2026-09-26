@@ -49,6 +49,9 @@ sealed interface PixelsMessage {
 
     /** The die's answer to "who are you", which it sends once on connecting. */
     data class Identity(val dieType: PixelsDieType, val batteryPercent: Int?) : PixelsMessage
+
+    /** How full the die is, sent unprompted as the charge changes. */
+    data class Battery(val percent: Int) : PixelsMessage
 }
 
 /**
@@ -71,6 +74,8 @@ object PixelsProtocol {
     private const val TYPE_I_AM_A_DIE = 2
     private const val TYPE_ROLL_STATE = 3
     private const val TYPE_BLINK = 29
+    private const val TYPE_REQUEST_BATTERY = 33
+    private const val TYPE_BATTERY = 34
 
     /**
      * The die is at rest after a movement big enough to count as a roll.
@@ -82,6 +87,14 @@ object PixelsProtocol {
 
     /** Asked once on connecting, so the app knows whether it is holding a d20. */
     val whoAreYou: ByteArray = byteArrayOf(TYPE_WHO_ARE_YOU.toByte())
+
+    /**
+     * Asked on connecting so a die that is nearly flat says so before the game starts.
+     *
+     * The die also reports this unprompted as the charge changes, so this is only needed
+     * to get a first reading rather than to poll.
+     */
+    val requestBattery: ByteArray = byteArrayOf(TYPE_REQUEST_BATTERY.toByte())
 
     /** Null for anything this app has no use for, which is most of the protocol. */
     fun decode(bytes: ByteArray): PixelsMessage? = when (bytes.firstOrNull()?.toInt()?.and(0xFF)) {
@@ -99,6 +112,10 @@ object PixelsProtocol {
                 // what it is; it simply does not say how full it is.
                 batteryPercent = if (bytes.size >= 21) bytes[20].toInt() and 0xFF else null,
             )
+        }
+
+        TYPE_BATTERY -> {
+            if (bytes.size < 2) null else PixelsMessage.Battery(bytes[1].toInt() and 0xFF)
         }
 
         else -> null
