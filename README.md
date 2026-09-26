@@ -94,8 +94,10 @@ signature, which the sideloading tools above add using your own Apple ID.
   competing with their name for the width
 - Deciding who goes first happens on the board rather than in a menu. While nobody has
   been chosen the board asks, in the middle where every seat can reach, and offers both
-  ways of answering; the numbers then land on the panels they belong to, a round at a
-  time, with tie-breaks played out as the separate rounds they are. The winner ends up
+  ways of answering — including finding a die, so reaching for one never means going
+  through the menu that then covers the board the roll plays out on. The numbers land on
+  the panels they belong to, a round at a time, with tie-breaks played out as the
+  separate rounds they are. The winner ends up
   the only panel still lit, ringed and named, which is the same signal the board already
   uses for whose turn it is
 - Ordinary dice from d4 to d20 plus a coin, and the throw tumbles before it lands — a

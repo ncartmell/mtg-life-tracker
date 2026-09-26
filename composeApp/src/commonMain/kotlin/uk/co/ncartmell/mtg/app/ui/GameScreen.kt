@@ -150,6 +150,7 @@ fun GameScreen(state: AppState) {
             FirstPlayerPrompt(
                 state = state,
                 onLater = { promptDismissed = true },
+                onFindDie = { rollOpen = true },
                 modifier = Modifier.align(Alignment.Center),
             )
         } else {
@@ -261,7 +262,7 @@ private fun rememberBoardRoll(state: AppState, game: GameState): BoardRoll {
     LaunchedEffect(spinning) {
         while (spinning) {
             tumble = tumble % 20 + 7
-            delay(70)
+            delay(95)
         }
     }
 
@@ -339,9 +340,9 @@ private const val THROW_TICKS = 8
 private const val THROW_TICK_MS = 55L
 
 /** Long enough to read as a throw, short enough that four seats do not become a wait. */
-private const val TUMBLE_MS = 620L
-private const val BETWEEN_ROUNDS_MS = 850L
-private const val SETTLED_MS = 1500L
+private const val TUMBLE_MS = 1000L
+private const val BETWEEN_ROUNDS_MS = 1300L
+private const val SETTLED_MS = 2800L
 
 /**
  * The board asking who starts, offering both ways of answering.
@@ -354,6 +355,8 @@ private const val SETTLED_MS = 1500L
 private fun FirstPlayerPrompt(
     state: AppState,
     onLater: () -> Unit,
+    /** Opens the roll dialog, which is where a die is found and connected. */
+    onFindDie: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -382,9 +385,35 @@ private fun FirstPlayerPrompt(
                     OutlinedButton(onClick = state::startRollOff) { Text("Pass the die") }
                 }
             }
-            // The way back to the menu, which this is standing in front of. Some tables
-            // have already decided before the app is even open.
-            TextButton(onClick = onLater) { Text("Later") }
+
+            val pixels = state.pixels
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // The way back to the menu, which this is standing in front of. Some
+                // tables have already decided before the app is even open.
+                TextButton(onClick = onLater) { Text("Later") }
+
+                // Without this the only route to a die was the menu — which this prompt
+                // is standing in front of, and which then covers the board the roll plays
+                // out on. A remembered die is reconnected when the game starts, so this is
+                // really for the first time, or for a die that did not wake up.
+                when {
+                    pixels.isConnected -> Unit
+                    pixels.status is PixelsStatus.Connecting ->
+                        Text(
+                            "Finding your die…",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                    pixels.supported ->
+                        TextButton(onClick = onFindDie) { Text("Use a die") }
+
+                    else -> Unit
+                }
+            }
         }
     }
 }
@@ -1087,8 +1116,12 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                     )
                     TextButton(onClick = state::cancelRollOff) { Text("Cancel the roll-off") }
                 } else {
+                    // Every one of these closes the dialog on its way out. The roll now
+                    // happens on the board, and leaving this open over the top of it meant
+                    // starting a roll and then watching a dialog while it played out
+                    // underneath.
                     Button(
-                        onClick = state::rollForFirstPlayer,
+                        onClick = { state.rollForFirstPlayer(); onDismiss() },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text(if (game.lastRoll == null) "Roll for first player" else "Roll again") }
 
@@ -1096,7 +1129,7 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                     // actually a die on the table to do it with.
                     if (state.pixels.isConnected) {
                         OutlinedButton(
-                            onClick = state::startRollOff,
+                            onClick = { state.startRollOff(); onDismiss() },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("Pass the die round instead") }
                     }
@@ -1117,6 +1150,7 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                                 OutlinedButton(onClick = {
                                     state.setFirstPlayer(player.seat)
                                     byHand = false
+                                    onDismiss()
                                 }) {
                                     Box(
                                         Modifier.size(10.dp)
@@ -1127,42 +1161,6 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                                     Text(player.name, maxLines = 1, softWrap = false)
                                 }
                             }
-                        }
-                    }
-                }
-
-                game.lastRoll?.takeIf { rollOff == null }?.let { roll ->
-                    Text(
-                        "${game.player(roll.winningSeat).name} goes first, " +
-                            "with ${roll.winningRoll}",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    roll.openingRoll.entries
-                        .sortedByDescending { it.value }
-                        .forEach { (seat, value) ->
-                            RollRow(
-                                colour = game.player(seat).colour.composeColor(),
-                                name = game.player(seat).name,
-                                value = value,
-                                won = !roll.wasTied && seat == roll.winningSeat,
-                            )
-                        }
-                    roll.tieBreaks.forEachIndexed { index, round ->
-                        Text(
-                            "Tied on ${round.keys.mapNotNull { roll.openingRoll[it] }.maxOrNull()}" +
-                                " — re-roll ${index + 1}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        round.entries.sortedByDescending { it.value }.forEach { (seat, value) ->
-                            RollRow(
-                                colour = game.player(seat).colour.composeColor(),
-                                name = game.player(seat).name,
-                                value = value,
-                                won = index == roll.tieBreaks.lastIndex &&
-                                    seat == roll.winningSeat,
-                            )
                         }
                     }
                 }
@@ -1486,27 +1484,6 @@ private fun PixelsPanel(state: AppState) {
 
         // Never reached: the whole panel is skipped when dice are unsupported.
         PixelsStatus.Unsupported -> Unit
-    }
-}
-
-@Composable
-private fun RollRow(colour: Color, name: String, value: Int, won: Boolean) {
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(colour))
-        Text(
-            name,
-            Modifier.weight(1f),
-            fontWeight = if (won) FontWeight.Bold else FontWeight.Normal,
-            maxLines = 1,
-        )
-        Text(
-            value.toString(),
-            fontWeight = if (won) FontWeight.Bold else FontWeight.Normal,
-        )
     }
 }
 
