@@ -94,6 +94,7 @@ import uk.co.ncartmell.mtg.engine.PanelStyle
 import uk.co.ncartmell.mtg.engine.TimeOfDay
 import uk.co.ncartmell.mtg.engine.UndercityRoom
 import uk.co.ncartmell.mtg.engine.PlanarFace
+import uk.co.ncartmell.mtg.engine.DiceRoll
 import uk.co.ncartmell.mtg.engine.GameOutcome
 import uk.co.ncartmell.mtg.engine.GameState
 import uk.co.ncartmell.mtg.engine.LossReason
@@ -110,6 +111,11 @@ fun GameScreen(state: AppState) {
     // dismissed — the winner is marked on the board, and that is worth being able to see.
     var resultDismissed by remember(game.outcome) { mutableStateOf(false) }
     var rollOpen by remember { mutableStateOf(false) }
+    val roll = rememberBoardRoll(state, game)
+    // Keyed on the game, so a table that waves the question away still gets asked again
+    // next game rather than never being offered it once.
+    var promptDismissed by remember(game.startedAt) { mutableStateOf(false) }
+    val asking = roll.offerPrompt && !promptDismissed
 
     Box(Modifier.fillMaxSize().padding(8.dp)) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -126,15 +132,34 @@ fun GameScreen(state: AppState) {
                             facing = boardSeat.facing,
                             onOpenDetail = { detailSeat = boardSeat.seat },
                             modifier = Modifier.weight(1f).fillMaxSize(),
+                            roll = roll.forSeat(boardSeat.seat),
                         )
                     }
                 }
             }
         }
 
-        // The only chrome on the board. It sits where the panels meet, so the table can
-        // reach it from any seat and no player loses room to a toolbar.
-        MenuButton(onClick = { menuOpen = true }, modifier = Modifier.align(Alignment.Center))
+        // Deciding who starts is the first thing a table does and it used to be three taps
+        // into a menu. While nobody has been chosen the board asks, in the one place every
+        // seat can reach, and the answer plays out on the panels rather than in a dialog.
+        //
+        // It stands in for the menu button rather than sitting on top of it: both want the
+        // middle of the board, and two things fighting over the same spot is worse than
+        // one thing at a time with a way back.
+        if (asking) {
+            FirstPlayerPrompt(
+                state = state,
+                onLater = { promptDismissed = true },
+                modifier = Modifier.align(Alignment.Center),
+            )
+        } else {
+            // The only chrome on the board. It sits where the panels meet, so the table
+            // can reach it from any seat and no player loses room to a toolbar.
+            MenuButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
     }
 
     if (menuOpen) {
@@ -171,6 +196,278 @@ fun GameScreen(state: AppState) {
                 onSeeBoard = { resultDismissed = true },
             )
         }
+    }
+}
+
+/**
+ * What the board is showing about the roll for first player, seat by seat.
+ *
+ * Two things arrive here by very different routes. A roll made all at once is decided by
+ * the engine in a single call and is already finished before anything is drawn, so what is
+ * played out is a *reveal* — round by round, at the speed a table can follow. A roll passed
+ * round on a real die arrives a number at a time over minutes, and needs no pacing at all
+ * because the players are the pacing. Both end up as the same thing on a panel.
+ */
+private class BoardRoll(
+    private val seats: Map<Int, PanelRoll>,
+    val offerPrompt: Boolean,
+) {
+    fun forSeat(seat: Int): PanelRoll? = seats[seat]
+}
+
+/**
+ * Drives the reveal, and works out what each panel should be showing.
+ *
+ * The animation is deliberately not in [AppState] or the engine: it is the difference
+ * between what has been decided and what has been *seen*, which no rule cares about and
+ * nothing should have to be saved to survive.
+ */
+@Composable
+private fun rememberBoardRoll(state: AppState, game: GameState): BoardRoll {
+    val rollOff = state.rollOff
+
+    // A roll restored with the game is history, not news. Seeding this with whatever is
+    // already on the game means reopening the app mid-game does not replay a roll from
+    // twenty minutes ago as though it had just happened.
+    var seen by remember { mutableStateOf(game.lastRoll) }
+    var showing by remember { mutableStateOf<DiceRoll?>(null) }
+    var round by remember { mutableStateOf(0) }
+    var tumbling by remember { mutableStateOf(false) }
+
+    LaunchedEffect(game.lastRoll) {
+        val fresh = game.lastRoll
+        if (fresh == null || fresh == seen) {
+            seen = fresh
+            return@LaunchedEffect
+        }
+        seen = fresh
+        showing = fresh
+        fresh.rounds.indices.forEach { index ->
+            round = index
+            tumbling = true
+            delay(TUMBLE_MS)
+            tumbling = false
+            // A tie-break needs a beat to read as a separate round rather than as the
+            // numbers having changed their minds.
+            delay(if (index == fresh.rounds.lastIndex) SETTLED_MS else BETWEEN_ROUNDS_MS)
+        }
+        showing = null
+    }
+
+    // One counter for the whole board, so every panel turns its digits together rather
+    // than each tumbling to its own rhythm.
+    var tumble by remember { mutableStateOf(1) }
+    val spinning = tumbling || rollOff?.awaiting != null
+    LaunchedEffect(spinning) {
+        while (spinning) {
+            tumble = tumble % 20 + 7
+            delay(70)
+        }
+    }
+
+    val reveal = showing
+    val seats = buildMap {
+        when {
+            // A real die, going round the table.
+            rollOff != null -> {
+                val settled = rollOff.result
+                rollOff.contenders.forEach { seat ->
+                    put(
+                        seat,
+                        PanelRoll(
+                            value = rollOff.current[seat]
+                                ?: rollOff.rounds.lastOrNull { seat in it }?.get(seat),
+                            awaiting = rollOff.awaiting == seat,
+                            // Before it settles the lit panel is whoever holds the die;
+                            // after, it is the winner and nobody else. One panel at full
+                            // strength at a time, so the board always has a single answer
+                            // to "who are we looking at".
+                            spent = if (settled != null) {
+                                settled.winningSeat != seat
+                            } else {
+                                rollOff.awaiting != seat
+                            },
+                            won = settled?.winningSeat == seat,
+                        ),
+                    )
+                }
+                // Knocked out of a tie-break: their opening number stays on the board, so
+                // nobody is left with a blank card wondering whether they rolled at all.
+                rollOff.rounds.firstOrNull()?.forEach { (seat, value) ->
+                    if (seat !in rollOff.contenders) {
+                        put(seat, PanelRoll(value = value, spent = true))
+                    }
+                }
+            }
+
+            // Rolled by the app, revealed a round at a time.
+            reveal != null -> {
+                val thisRound = reveal.rounds[round]
+                // The last round, landed. Until then every seat still in contention is
+                // lit, because until then any of them could take it.
+                val decided = !tumbling && round == reveal.rounds.lastIndex
+                reveal.openingRoll.keys.forEach { seat ->
+                    val inRound = seat in thisRound
+                    put(
+                        seat,
+                        PanelRoll(
+                            value = if (inRound) thisRound[seat] else reveal.openingRoll[seat],
+                            tumbling = inRound && tumbling,
+                            tumble = tumble,
+                            spent = if (decided) seat != reveal.winningSeat else !inRound,
+                            won = decided && seat == reveal.winningSeat,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    return BoardRoll(
+        seats = seats,
+        // Only while there is genuinely nothing decided, and never over the top of a roll
+        // that is already happening.
+        offerPrompt = game.startingSeat == null &&
+            game.outcome == null &&
+            rollOff == null &&
+            reveal == null,
+    )
+}
+
+/** A throw tumbles briefly so it reads as having landed rather than having appeared. */
+private const val THROW_TICKS = 8
+private const val THROW_TICK_MS = 55L
+
+/** Long enough to read as a throw, short enough that four seats do not become a wait. */
+private const val TUMBLE_MS = 620L
+private const val BETWEEN_ROUNDS_MS = 850L
+private const val SETTLED_MS = 1500L
+
+/**
+ * The board asking who starts, offering both ways of answering.
+ *
+ * Sits over the middle of the board where the menu button lives, because that is the one
+ * spot every seat can reach and because at this point in a game there is nothing
+ * underneath it worth reading — no life total has moved yet.
+ */
+@Composable
+private fun FirstPlayerPrompt(
+    state: AppState,
+    onLater: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.padding(horizontal = 12.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+    ) {
+        Column(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Who goes first?",
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(onClick = state::rollForFirstPlayer) { Text("Roll") }
+                // Offered only when there is a die on the table to pass.
+                if (state.pixels.isConnected) {
+                    OutlinedButton(onClick = state::startRollOff) { Text("Pass the die") }
+                }
+            }
+            // The way back to the menu, which this is standing in front of. Some tables
+            // have already decided before the app is even open.
+            TextButton(onClick = onLater) { Text("Later") }
+        }
+    }
+}
+
+/**
+ * One seat's part in a roll for first player, as the board draws it.
+ *
+ * Presentation only. The rules of a roll-off are [RollOff]'s and the numbers are the
+ * engine's; this is the difference between what has been decided and what the table has
+ * been shown, which is a matter of tenths of a second and belongs nowhere near the engine.
+ */
+private data class PanelRoll(
+    /** The number to show, or null while this seat has yet to roll. */
+    val value: Int?,
+    /** Digits still tumbling, so the number lands rather than appears. */
+    val tumbling: Boolean = false,
+    /** What to show while tumbling. Driven by the board so every panel turns together. */
+    val tumble: Int = 1,
+    /** The die is with this player now, and everyone is waiting on them. */
+    val awaiting: Boolean = false,
+    /** Out of this round: still shown, but stepped back behind whoever is still in it. */
+    val spent: Boolean = false,
+    val won: Boolean = false,
+)
+
+/**
+ * The middle of a panel during a roll: the number, and what it means.
+ *
+ * The label carries the state rather than a separate badge, because at four players a
+ * panel is already carrying a name, a colour and a ring, and a fifth thing competing for
+ * the same corner is how the turn marker went wrong the first time.
+ */
+@Composable
+private fun RollFace(roll: PanelRoll, ink: Color, size: TextUnit, tight: Boolean) {
+    // The winning number grows into itself rather than simply stopping. Every other panel
+    // is stepping back at the same moment, so the two together read as one gesture.
+    val pop by animateFloatAsState(
+        targetValue = if (roll.won) 1.18f else 1f,
+        animationSpec = tween(360, easing = FastOutSlowInEasing),
+        label = "rollPop",
+    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(if (tight) 0.dp else 2.dp),
+    ) {
+        // Nothing at all until there is a number, rather than a placeholder. A dash set at
+        // a life total's size is a slab once the panel has been turned a quarter turn to
+        // face its player, and the label underneath already says what the gap means.
+        if (roll.tumbling || roll.value != null) {
+            Text(
+                if (roll.tumbling) roll.tumble.toString() else roll.value.toString(),
+                fontSize = size,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                // Stepped back while the digits turn, so the number reads as landing
+                // rather than as having been there all along.
+                modifier = Modifier
+                    .scale(pop)
+                    .alpha(if (roll.tumbling) 0.72f else 1f),
+            )
+        }
+        Text(
+            when {
+                roll.awaiting -> "roll the die"
+                roll.won -> "goes first"
+                roll.tumbling -> "rolling"
+                roll.value == null -> "to roll"
+                else -> "rolled"
+            },
+            color = ink,
+            // Carries the panel on its own while a seat is waiting, so it is sized for
+            // that rather than for sitting under a number.
+            style = if (roll.value == null && !roll.tumbling) {
+                MaterialTheme.typography.titleMedium
+            } else {
+                MaterialTheme.typography.labelMedium
+            },
+            fontWeight = if (roll.won || roll.awaiting) FontWeight.Bold else FontWeight.Normal,
+            letterSpacing = 0.08.em,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
@@ -295,6 +592,14 @@ private fun PlayerPanel(
     facing: Facing,
     onOpenDetail: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * This seat's part in a roll for first player, while one is being played out.
+     *
+     * Non-null takes over the middle of the card. Nobody's life has moved yet at the point
+     * a table is deciding who starts, so the total is not what the panel is for — and a
+     * roll shown on the panel it belongs to needs no legend explaining whose it is.
+     */
+    roll: PanelRoll? = null,
 ) {
     val panel = player.panel
     val background = panel.baseColor()
@@ -311,14 +616,23 @@ private fun PlayerPanel(
     // once, with nothing left bright, just reads as a broken board.
     val turnInProgress = game.outcome == null &&
         game.turnSeat?.let { !game.player(it).isOut } == true
-    val isTheirTurn = turnInProgress && game.turnSeat == player.seat && !player.isOut
+    // A roll in progress borrows the same signal: whoever the board is waiting on is the
+    // one panel left at full strength. It is the question the table is answering right
+    // now, so it should be the thing the board is saying.
+    val isTheirTurn = if (roll != null) !roll.spent else {
+        turnInProgress && game.turnSeat == player.seat && !player.isOut
+    }
     // Whose turn it is, said with the card rather than a word on it: theirs is the only
     // panel at full strength, and the table reads that from across the room without
     // anybody having to find a label.
+    // A roll counts as something being in progress. Without it the step below short
+    // circuits before the first turn — which is exactly when a roll happens — and every
+    // panel stays at full strength, leaving nothing to mark the seat being waited on.
+    val settling = roll != null
     val step = { colour: Color ->
         when {
             player.isOut -> colour.drained()
-            !turnInProgress || isTheirTurn -> colour
+            !(turnInProgress || settling) || isTheirTurn -> colour
             else -> colour.resting()
         }
     }
@@ -445,7 +759,12 @@ private fun PlayerPanel(
             // whole right third puts one on, so nobody has to hit a glyph mid-game. The
             // middle third does nothing, so the card can still be touched safely. This sits
             // under the content, which only steals the taps it has a button for.
-            if (player.isOut) {
+            if (roll != null) {
+                // Inert while a roll is being decided. The card is showing a number that
+                // is not a life total, and the thirds that normally change one would be
+                // acting on something nobody can see.
+                Box(Modifier.fillMaxSize())
+            } else if (player.isOut) {
                 // Nothing here to adjust, so the whole card opens the detail. Without
                 // this a player who is out has no target at all — the life columns are
                 // gone and the swipe lived on the middle one, which left no way back in.
@@ -527,6 +846,8 @@ private fun PlayerPanel(
                                 style = MaterialTheme.typography.labelMedium,
                             )
                         }
+                    } else if (roll != null) {
+                        RollFace(roll, ink, lifeSize, tight)
                     } else if (hasWon) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -585,7 +906,10 @@ private fun PlayerPanel(
                     }
                 }
 
-                if (!player.isOut && !hasWon) {
+                // Nothing to adjust while the table is deciding who starts, and a stray
+                // tap on a third of the card would otherwise change a life total nobody
+                // is looking at.
+                if (!player.isOut && !hasWon && roll == null) {
                     StepGlyph("\u2212", ink, glyphSize, discSize, Modifier.align(Alignment.CenterStart))
                     StepGlyph("+", ink, glyphSize, discSize, Modifier.align(Alignment.CenterEnd))
                 }
@@ -681,10 +1005,6 @@ private fun PlayerPanel(
                         )
                     }
 
-                    game.lastRoll?.openingRoll?.get(player.seat)?.let { rolled ->
-                        Counter("Roll", rolled, null, ink, cardColour)
-                    }
-
                     player.activeCounters.forEach { (counter, value) ->
                         Counter(counter.short, value, counter.max, ink, cardColour)
                     }
@@ -748,9 +1068,24 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                 // While a real die is going round, the buttons stand aside: half a
                 // roll-off and a "roll it for me" button next to each other is an
                 // invitation to decide the same thing twice.
+                //
+                // The roll-off itself is not drawn here any more. It plays out on the
+                // board, on the panels it belongs to, and repeating it in a dialog over
+                // the top of that would be showing the same thing twice in two shapes.
                 val rollOff = state.rollOff
                 if (rollOff != null) {
-                    RollOffProgress(game, rollOff, onCancel = state::cancelRollOff)
+                    Text(
+                        rollOff.awaiting?.let { "Waiting on ${game.player(it).name} to roll." }
+                            ?: "Rolling.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Close this to watch it on the board.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = state::cancelRollOff) { Text("Cancel the roll-off") }
                 } else {
                     Button(
                         onClick = state::rollForFirstPlayer,
@@ -948,8 +1283,32 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
 
                 state.lastThrow?.let { thrown ->
                     val several = thrown.values.size > 1
+
+                    // A number that simply replaces the last one is indistinguishable from
+                    // a number that never changed — which on a re-roll landing the same
+                    // total is exactly what it looks like. Tumbling for a moment first
+                    // makes the throw an event rather than a value.
+                    var landing by remember(thrown) { mutableStateOf(true) }
+                    var tick by remember(thrown) { mutableStateOf(0) }
+                    LaunchedEffect(thrown) {
+                        repeat(THROW_TICKS) {
+                            delay(THROW_TICK_MS)
+                            tick++
+                        }
+                        landing = false
+                    }
+
                     Text(
                         when {
+                            landing && thrown.isCoin -> if (tick % 2 == 0) "Heads" else "Tails"
+
+                            // Held inside the range these dice could actually produce, so
+                            // the digits never flash a total that was never possible.
+                            landing -> (
+                                (tick * 7 + 5) % (thrown.sides * thrown.values.size) +
+                                    thrown.values.size
+                                ).toString()
+
                             // Several coins have no total worth printing, so they are
                             // counted instead — which is what the card asking for them
                             // almost always wants to know.
@@ -960,6 +1319,7 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
                             thrown.isCoin -> if (thrown.values.first() == 2) "Heads" else "Tails"
                             else -> thrown.total.toString()
                         },
+                        modifier = Modifier.alpha(if (landing) 0.68f else 1f),
                         style = MaterialTheme.typography.displaySmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
@@ -988,50 +1348,6 @@ private fun RollDialog(state: AppState, game: GameState, onDismiss: () -> Unit) 
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
-}
-
-/**
- * The roll-off as it goes round the table.
- *
- * Whose turn it is to roll is the only thing that matters here, so it is the one thing set
- * in the player's own colour and full size — the die is flashing that colour at the same
- * time, and the two together are what tell somebody across the table that it is them.
- */
-@Composable
-private fun RollOffProgress(game: GameState, rollOff: RollOff, onCancel: () -> Unit) {
-    rollOff.awaiting?.let { seat ->
-        val player = game.player(seat)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(Modifier.size(14.dp).clip(CircleShape).background(player.panel.baseColor()))
-            Text(
-                "Pass the die to ${player.name}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-        Text(
-            buildString {
-                if (rollOff.tieBreakNumber > 0) append("Tie-break ${rollOff.tieBreakNumber} — ")
-                append("${rollOff.rolledThisRound} of ${rollOff.contenders.size} rolled")
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-
-    rollOff.current.entries.sortedByDescending { it.value }.forEach { (seat, value) ->
-        RollRow(
-            colour = game.player(seat).panel.baseColor(),
-            name = game.player(seat).name,
-            value = value,
-            won = false,
-        )
-    }
-
-    TextButton(onClick = onCancel) { Text("Cancel") }
 }
 
 /**

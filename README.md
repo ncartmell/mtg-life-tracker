@@ -92,8 +92,15 @@ signature, which the sideloading tools above add using your own Apple ID.
   planeswalk — and a note of whichever plane is in play
 - A swipe across the middle of a panel opens that player's detail. There is no button
   competing with their name for the width
-- A roll screen: the whole table's roll for first player laid out in order, tie-breaks
-  shown as the separate rounds they were, and ordinary dice from d4 to d20 plus a coin.
+- Deciding who goes first happens on the board rather than in a menu. While nobody has
+  been chosen the board asks, in the middle where every seat can reach, and offers both
+  ways of answering; the numbers then land on the panels they belong to, a round at a
+  time, with tie-breaks played out as the separate rounds they are. The winner ends up
+  the only panel still lit, ringed and named, which is the same signal the board already
+  uses for whose turn it is
+- Ordinary dice from d4 to d20 plus a coin, and the throw tumbles before it lands — a
+  number that merely replaces the last one looks identical to one that never changed,
+  which on a re-roll of the same total is exactly what it was.
   Several at once, since plenty of cards ask for that and adding them up by hand is the
   sort of thing the app is for, and any number of sides for the cards that want a d3 or
   a d7. Or skip the roll entirely and simply name whoever is starting — not every table
